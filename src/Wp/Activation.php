@@ -122,14 +122,16 @@ class Activation
             einrichtung TEXT NULL,
             ort TEXT NULL,
             ba_zeiteinteilung_raw TEXT NULL,
+            stunden_pro_woche FLOAT NULL,
+            stunden_quelle VARCHAR(32) NULL,
             vze_wert FLOAT DEFAULT 0,
             UNIQUE KEY idx_s_nr (s_nr)
         ) {$charset_collate};";
 
         dbDelta($sql_stats);
 
-        // Neue Installationen starten mit Schema-Version 4 (inkl. ba_zeiteinteilung_raw in bs_awo_stats).
-        update_option('bs_awo_jobs_db_version', 4);
+        // Neue Installationen starten mit Schema-Version 5 (inkl. Stunden-Spalten in bs_awo_stats).
+        update_option('bs_awo_jobs_db_version', 5);
     }
 
     /**
@@ -190,6 +192,13 @@ class Activation
         if ($version < 4) {
             self::ensure_stats_table();
             update_option('bs_awo_jobs_db_version', 4);
+            $version = 4;
+        }
+
+        // Ab Version 5: sicherstellen, dass bs_awo_stats die Stunden-Spalten enthält.
+        if ($version < 5) {
+            self::ensure_stats_table();
+            update_option('bs_awo_jobs_db_version', 5);
         }
     }
 
@@ -253,6 +262,8 @@ class Activation
             einrichtung TEXT NULL,
             ort TEXT NULL,
             ba_zeiteinteilung_raw TEXT NULL,
+            stunden_pro_woche FLOAT NULL,
+            stunden_quelle VARCHAR(32) NULL,
             vze_wert FLOAT DEFAULT 0,
             UNIQUE KEY idx_s_nr (s_nr)
         ) {$charset_collate};";

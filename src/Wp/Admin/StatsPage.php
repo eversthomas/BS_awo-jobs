@@ -18,6 +18,11 @@ class StatsPage
     const OPTION_VZE_MAPPING = 'bs_awo_jobs_vze_mapping';
 
     /**
+     * Option-Key für die Vollzeit-Stundenzahl (Basis für VZE-Berechnung).
+     */
+    const OPTION_FULLTIME_HOURS = 'bs_awo_jobs_fulltime_hours';
+
+    /**
      * Nonce für den Fluktuations-Upload.
      */
     const NONCE_IMPORT_STATS = 'bs_awo_jobs_import_stats';
@@ -26,6 +31,11 @@ class StatsPage
      * Nonce für das Speichern des VZE-Mappings.
      */
     const NONCE_SAVE_VZE_MAPPING = 'bs_awo_jobs_save_vze_mapping';
+
+    /**
+     * Nonce für das Nachziehen von Stunden & VZE aus der API.
+     */
+    const NONCE_SYNC_HOURS_FROM_API = 'bs_awo_jobs_sync_hours_from_api';
 
     /**
      * Bootstrap.
@@ -38,6 +48,7 @@ class StatsPage
         add_action('admin_enqueue_scripts', [self::class, 'enqueue_assets']);
         add_action('admin_post_bs_awo_jobs_import_stats', [self::class, 'handle_import_stats']);
         add_action('admin_post_bs_awo_jobs_save_vze_mapping', [self::class, 'handle_save_vze_mapping']);
+        add_action('admin_post_bs_awo_jobs_sync_hours_from_api', [self::class, 'handle_sync_hours_from_api']);
     }
 
     /**
@@ -125,10 +136,210 @@ class StatsPage
         $totalJobs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$jobsTable}");
 
         // Basis-Kennzahl für Fluktuations-Upload.
-        $statsCount = null;
+        $statsCount      = null;
         $statsTableExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $statsTable)) === $statsTable;
         if ($statsTableExists) {
             $statsCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$statsTable}");
+        }
+
+        // Filter-Werte für Fluktuations-Tab (Zeitraum, Fachbereiche, Einrichtung).
+        $filterMonth = isset($_GET['fluktuation_month']) ? sanitize_text_field(wp_unslash($_GET['fluktuation_month'])) : '';
+        $filterYear  = isset($_GET['fluktuation_year']) ? sanitize_text_field(wp_unslash($_GET['fluktuation_year'])) : '';
+        $filterExt   = isset($_GET['fluktuation_fach_ext']) ? sanitize_text_field(wp_unslash($_GET['fluktuation_fach_ext'])) : '';
+        $filterDept  = isset($_GET['fluktuation_dept']) ? sanitize_text_field(wp_unslash($_GET['fluktuation_dept'])) : '';
+        $filterFac   = isset($_GET['fluktuation_facility']) ? sanitize_text_field(wp_unslash($_GET['fluktuation_facility'])) : '';
+
+        $selectedMonth = ctype_digit($filterMonth) ? (int) $filterMonth : 0;
+        if ($selectedMonth < 1 || $selectedMonth > 12) {
+            $selectedMonth = 0;
+        }
+        $selectedYear = ctype_digit($filterYear) ? (int) $filterYear : 0;
+
+        // Dropdown-Optionen aus Stats-Tabelle.
+        $yearOptions = [];
+        if ($statsTableExists) {
+            $minYear = (int) $wpdb->get_var("SELECT MIN(YEAR(start_date)) FROM {$statsTable} WHERE start_date IS NOT NULL");
+            $maxYear = (int) $wpdb->get_var("SELECT MAX(YEAR(start_date)) FROM {$statsTable} WHERE start_date IS NOT NULL");
+            if ($minYear > 0 && $maxYear >= $minYear) {
+                for ($y = $minYear; $y <= $maxYear; $y++) {
+                    $yearOptions[] = $y;
+                }
+            }
+        }
+
+        $extOptions  = [];
+        $deptOptions = [];
+        $facOptions  = [];
+        if ($statsTableExists) {
+            $extOptions = $wpdb->get_col(
+                "SELECT DISTINCT fachbereich_ext 
+                 FROM {$statsTable} 
+                 WHERE fachbereich_ext IS NOT NULL AND fachbereich_ext <> ''
+                 ORDER BY fachbereich_ext ASC"
+            );
+            $deptOptions = $wpdb->get_col(
+                "SELECT DISTINCT fachbereich_int 
+                 FROM {$statsTable} 
+                 WHERE fachbereich_int IS NOT NULL AND fachbereich_int <> ''
+                 ORDER BY fachbereich_int ASC"
+            );
+            $facOptions  = $wpdb->get_col(
+                "SELECT DISTINCT einrichtung 
+                 FROM {$statsTable} 
+                 WHERE einrichtung IS NOT NULL AND einrichtung <> ''
+                 ORDER BY einrichtung ASC"
+            );
+        }
+
+        // Gefilterte Aggregationen für Fluktuations-Dashboard.
+        $fluctTotalVze = 0.0;
+        $fluctVzeByDept = [
+            'labels' => [],
+            'values' => [],
+        ];
+        $fluctVzeByEmployment = [
+            'labels' => [],
+            'values' => [],
+        ];
+        $fluctJobsByTitle = [
+            'labels' => [],
+            'values' => [],
+        ];
+
+        if ($statsTableExists) {
+            $where   = [];
+            $params  = [];
+
+            if ($selectedYear > 0) {
+                $where[]  = 'YEAR(start_date) = %d';
+                $params[] = $selectedYear;
+            }
+
+            if ($selectedMonth > 0) {
+                $where[]  = 'MONTH(start_date) = %d';
+                $params[] = $selectedMonth;
+            }
+
+            if ($filterExt !== '') {
+                $where[]  = 'fachbereich_ext = %s';
+                $params[] = $filterExt;
+            }
+
+            if ($filterDept !== '') {
+                $where[]  = 'fachbereich_int = %s';
+                $params[] = $filterDept;
+            }
+
+            if ($filterFac !== '') {
+                $where[]  = 'einrichtung = %s';
+                $params[] = $filterFac;
+            }
+
+            $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+            // Gesamt offene VZE.
+            if (! empty($params)) {
+                $fluctTotalVze = (float) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT SUM(vze_wert) FROM {$statsTable} {$whereSql}",
+                        $params
+                    )
+                );
+            } else {
+                $fluctTotalVze = (float) $wpdb->get_var("SELECT SUM(vze_wert) FROM {$statsTable} {$whereSql}");
+            }
+
+            // Summe VZE pro internem Fachbereich.
+            if (! empty($params)) {
+                $rowsDept = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT fachbereich_int, SUM(vze_wert) AS vze
+                         FROM {$statsTable}
+                         {$whereSql}
+                         GROUP BY fachbereich_int
+                         ORDER BY vze DESC",
+                        $params
+                    )
+                );
+            } else {
+                $rowsDept = $wpdb->get_results(
+                    "SELECT fachbereich_int, SUM(vze_wert) AS vze
+                     FROM {$statsTable}
+                     {$whereSql}
+                     GROUP BY fachbereich_int
+                     ORDER BY vze DESC"
+                );
+            }
+
+            if (! empty($rowsDept)) {
+                foreach ($rowsDept as $row) {
+                    $label = $row->fachbereich_int !== '' ? $row->fachbereich_int : __('(ohne internes Kürzel)', 'bs-awo-jobs');
+                    $fluctVzeByDept['labels'][] = $label;
+                    $fluctVzeByDept['values'][] = (float) $row->vze;
+                }
+            }
+
+            // Verteilung der Anstellungsarten (nach VZE).
+            if (! empty($params)) {
+                $rowsEmp = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT anstellungsart, SUM(vze_wert) AS vze
+                         FROM {$statsTable}
+                         {$whereSql}
+                         GROUP BY anstellungsart
+                         ORDER BY vze DESC",
+                        $params
+                    )
+                );
+            } else {
+                $rowsEmp = $wpdb->get_results(
+                    "SELECT anstellungsart, SUM(vze_wert) AS vze
+                     FROM {$statsTable}
+                     {$whereSql}
+                     GROUP BY anstellungsart
+                     ORDER BY vze DESC"
+                );
+            }
+
+            if (! empty($rowsEmp)) {
+                foreach ($rowsEmp as $row) {
+                    $label = $row->anstellungsart !== '' ? $row->anstellungsart : __('(ohne Anstellungsart)', 'bs-awo-jobs');
+                    $fluctVzeByEmployment['labels'][] = $label;
+                    $fluctVzeByEmployment['values'][] = (float) $row->vze;
+                }
+            }
+
+            // Häufig ausgeschriebene Jobtitel (nach aktuellen Filtern), unabhängig von VZE.
+            if (! empty($params)) {
+                $rowsJobs = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT job_titel, COUNT(*) AS cnt
+                         FROM {$statsTable}
+                         {$whereSql}
+                         GROUP BY job_titel
+                         ORDER BY cnt DESC
+                         LIMIT 15",
+                        $params
+                    )
+                );
+            } else {
+                $rowsJobs = $wpdb->get_results(
+                    "SELECT job_titel, COUNT(*) AS cnt
+                     FROM {$statsTable}
+                     {$whereSql}
+                     GROUP BY job_titel
+                     ORDER BY cnt DESC
+                     LIMIT 15"
+                );
+            }
+
+            if (! empty($rowsJobs)) {
+                foreach ($rowsJobs as $row) {
+                    $label = $row->job_titel !== '' ? $row->job_titel : __('(ohne Jobtitel)', 'bs-awo-jobs');
+                    $fluctJobsByTitle['labels'][] = $label;
+                    $fluctJobsByTitle['values'][] = (int) $row->cnt;
+                }
+            }
         }
 
         // Verteilung nach API-Fachbereich.
@@ -199,6 +410,18 @@ class StatsPage
                     'api'              => $apiChartData,
                     'custom'           => $customChartData,
                     'facility'         => $facilityChartData,
+                ]
+            );
+
+            // Fluktuations-Daten für VZE-basierte Diagramme.
+            wp_localize_script(
+                'bs-awo-jobs-dashboard-charts',
+                'BsAwoJobsFluktuationData',
+                [
+                    'totalVze'         => $fluctTotalVze,
+                    'vzeByDept'        => $fluctVzeByDept,
+                    'vzeByEmployment'  => $fluctVzeByEmployment,
+                    'jobsByTitle'      => $fluctJobsByTitle,
                 ]
             );
         }
@@ -587,6 +810,112 @@ class StatsPage
 
                 <hr />
 
+                <h3><?php echo esc_html__('Filter für VZE-Analyse', 'bs-awo-jobs'); ?></h3>
+                <form method="get" style="margin-bottom: 1em;">
+                    <input type="hidden" name="page" value="bs-awo-jobs-stats" />
+                    <input type="hidden" name="tab" value="fluktuation" />
+
+                    <label for="bs_awo_jobs_fluktuation_month">
+                        <?php echo esc_html__('Monat', 'bs-awo-jobs'); ?>
+                    </label>
+                    <select id="bs_awo_jobs_fluktuation_month" name="fluktuation_month">
+                        <option value=""><?php echo esc_html__('Alle', 'bs-awo-jobs'); ?></option>
+                        <?php
+                        $monthNames = [
+                            1  => __('Januar', 'bs-awo-jobs'),
+                            2  => __('Februar', 'bs-awo-jobs'),
+                            3  => __('März', 'bs-awo-jobs'),
+                            4  => __('April', 'bs-awo-jobs'),
+                            5  => __('Mai', 'bs-awo-jobs'),
+                            6  => __('Juni', 'bs-awo-jobs'),
+                            7  => __('Juli', 'bs-awo-jobs'),
+                            8  => __('August', 'bs-awo-jobs'),
+                            9  => __('September', 'bs-awo-jobs'),
+                            10 => __('Oktober', 'bs-awo-jobs'),
+                            11 => __('November', 'bs-awo-jobs'),
+                            12 => __('Dezember', 'bs-awo-jobs'),
+                        ];
+                        foreach ($monthNames as $mNum => $mLabel) :
+                            ?>
+                            <option value="<?php echo esc_attr($mNum); ?>" <?php selected($selectedMonth, $mNum); ?>>
+                                <?php echo esc_html($mLabel); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <label for="bs_awo_jobs_fluktuation_year" style="margin-left: 1em;">
+                        <?php echo esc_html__('Jahr', 'bs-awo-jobs'); ?>
+                    </label>
+                    <select id="bs_awo_jobs_fluktuation_year" name="fluktuation_year">
+                        <option value=""><?php echo esc_html__('Alle', 'bs-awo-jobs'); ?></option>
+                        <?php foreach ($yearOptions as $year) : ?>
+                            <option value="<?php echo esc_attr($year); ?>" <?php selected($selectedYear, $year); ?>>
+                                <?php echo esc_html($year); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <label for="bs_awo_jobs_fluktuation_fach_ext" style="margin-left: 1em;">
+                        <?php echo esc_html__('Fachbereich (global)', 'bs-awo-jobs'); ?>
+                    </label>
+                    <select id="bs_awo_jobs_fluktuation_fach_ext" name="fluktuation_fach_ext">
+                        <option value=""><?php echo esc_html__('Alle', 'bs-awo-jobs'); ?></option>
+                        <?php foreach ($extOptions as $ext) : ?>
+                            <option value="<?php echo esc_attr($ext); ?>" <?php selected($filterExt, $ext); ?>>
+                                <?php echo esc_html($ext); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <label for="bs_awo_jobs_fluktuation_dept" style="margin-left: 1em;">
+                        <?php echo esc_html__('Fachbereich intern (Internes Kürzel)', 'bs-awo-jobs'); ?>
+                    </label>
+                    <select id="bs_awo_jobs_fluktuation_dept" name="fluktuation_dept">
+                        <option value=""><?php echo esc_html__('Alle', 'bs-awo-jobs'); ?></option>
+                        <?php foreach ($deptOptions as $dept) : ?>
+                            <option value="<?php echo esc_attr($dept); ?>" <?php selected($filterDept, $dept); ?>>
+                                <?php echo esc_html($dept); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <label for="bs_awo_jobs_fluktuation_facility" style="margin-left: 1em;">
+                        <?php echo esc_html__('Einrichtung', 'bs-awo-jobs'); ?>
+                    </label>
+                    <select id="bs_awo_jobs_fluktuation_facility" name="fluktuation_facility">
+                        <option value=""><?php echo esc_html__('Alle', 'bs-awo-jobs'); ?></option>
+                        <?php foreach ($facOptions as $facName) : ?>
+                            <option value="<?php echo esc_attr($facName); ?>" <?php selected($filterFac, $facName); ?>>
+                                <?php echo esc_html($facName); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <?php submit_button(__('Filter anwenden', 'bs-awo-jobs'), 'secondary', '', false, ['style' => 'margin-left: 1em;']); ?>
+                </form>
+
+                <div class="bs-awo-jobs-kpi-grid" style="margin-bottom: 1.5em;">
+                    <div class="bs-awo-jobs-kpi-box">
+                        <div class="bs-awo-jobs-kpi-label">
+                            <?php echo esc_html__('Gesamt offene VZE (gefiltert)', 'bs-awo-jobs'); ?>
+                        </div>
+                        <div class="bs-awo-jobs-kpi-value">
+                            <?php echo esc_html(number_format_i18n($fluctTotalVze, 2)); ?>
+                        </div>
+                    </div>
+                </div>
+
+                <h3><?php echo esc_html__('VZE nach internem Fachbereich', 'bs-awo-jobs'); ?></h3>
+                <canvas id="bs_awo_jobs_fluktuation_vze_by_dept" width="400" height="220"></canvas>
+
+                <h3 style="margin-top: 2em;"><?php echo esc_html__('Verteilung der Anstellungsarten (nach VZE)', 'bs-awo-jobs'); ?></h3>
+                <canvas id="bs_awo_jobs_fluktuation_vze_by_employment" width="360" height="220"></canvas>
+
+                <h3 style="margin-top: 2em;"><?php echo esc_html__('Häufig ausgeschriebene Jobtitel (nach Filter)', 'bs-awo-jobs'); ?></h3>
+                <canvas id="bs_awo_jobs_fluktuation_jobs_by_title" width="400" height="220"></canvas>
+
+                <hr />
+
                 <?php
                 // VZE-Mapping-Status (Option).
                 $vzeMapping = get_option(self::OPTION_VZE_MAPPING, []);
@@ -664,6 +993,93 @@ class StatsPage
                         <?php echo esc_html__('Nach dem Speichern wird das Mapping beim nächsten Excel-Import für die Berechnung von vze_wert verwendet.', 'bs-awo-jobs'); ?>
                     </p>
                 </form>
+
+                <hr />
+
+                <?php
+                // Status für Stunden-/VZE-Abgleich aus API.
+                $hoursSyncStatus = isset($_GET['bs_awo_hours_sync']) ? sanitize_text_field(wp_unslash($_GET['bs_awo_hours_sync'])) : '';
+                $hoursJobs       = isset($_GET['hours_jobs']) ? (int) $_GET['hours_jobs'] : 0;
+                $hoursUpdates    = isset($_GET['hours_updates']) ? (int) $_GET['hours_updates'] : 0;
+
+                if ($hoursSyncStatus === 'ok') :
+                    ?>
+                    <div class="notice notice-success is-dismissible">
+                        <p>
+                            <?php
+                            echo esc_html(
+                                sprintf(
+                                    /* translators: 1: jobs with detected hours, 2: stats rows updated */
+                                    __('Stunden aus der API aktualisiert: %1$d Jobs mit Stundenangabe, %2$d Statistikeinträge aktualisiert.', 'bs-awo-jobs'),
+                                    $hoursJobs,
+                                    $hoursUpdates
+                                )
+                            );
+                            ?>
+                        </p>
+                    </div>
+                <?php elseif ($hoursSyncStatus === 'no_jobs') : ?>
+                    <div class="notice notice-warning is-dismissible">
+                        <p><?php echo esc_html__('Keine Jobs mit gespeicherten API-Daten gefunden. Bitte führe zuerst einen Sync auf der Einstellungsseite aus.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php elseif ($hoursSyncStatus === 'no_tables') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Die benötigten Tabellen (bsawo_jobs_current oder bs_awo_stats) existieren nicht.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php endif; ?>
+
+                <h3><?php echo esc_html__('Stunden & VZE aus JSON-API', 'bs-awo-jobs'); ?></h3>
+                <p class="description">
+                    <?php
+                    echo esc_html__(
+                        'Hier kannst du für alle Einträge in bs_awo_stats, deren Stellennummer in der aktuellen Job-Tabelle vorhanden ist, Wochenstunden aus den API-Texten (Zeitmodell, Infos, Einleitungstext, Wirbieten) auslesen und daraus VZE-Werte auf Basis von 39 Stunden Vollzeit berechnen.',
+                        'bs-awo-jobs'
+                    );
+                    ?>
+                </p>
+
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 1em;">
+                    <?php wp_nonce_field(self::NONCE_SYNC_HOURS_FROM_API); ?>
+                    <input type="hidden" name="action" value="bs_awo_jobs_sync_hours_from_api" />
+                    <?php submit_button(__('Stunden & VZE aus API nachziehen', 'bs-awo-jobs'), 'secondary', 'submit', false); ?>
+                </form>
+
+                <?php if ($statsTableExists) : ?>
+                    <?php
+                    // Kleine Abdeckungs-Statistik für Stunden/VZE.
+                    $hoursCount = (int) $wpdb->get_var(
+                        "SELECT COUNT(*) FROM {$statsTable} WHERE stunden_pro_woche IS NOT NULL AND stunden_pro_woche > 0"
+                    );
+                    $vzeFromHoursCount = (int) $wpdb->get_var(
+                        "SELECT COUNT(*) FROM {$statsTable} WHERE stunden_pro_woche IS NOT NULL AND stunden_pro_woche > 0 AND vze_wert > 0"
+                    );
+                    $vzeWithoutHoursCount = (int) $wpdb->get_var(
+                        "SELECT COUNT(*) FROM {$statsTable} WHERE (stunden_pro_woche IS NULL OR stunden_pro_woche <= 0) AND vze_wert > 0"
+                    );
+                    $noVzeCount = max(0, (int) $statsCount - ($vzeFromHoursCount + $vzeWithoutHoursCount));
+                    ?>
+                    <div style="margin-top: 1.5em;">
+                        <h4><?php echo esc_html__('Abdeckung Stunden/VZE', 'bs-awo-jobs'); ?></h4>
+                        <ul>
+                            <li>
+                                <strong><?php echo esc_html__('Einträge mit Stunden aus API', 'bs-awo-jobs'); ?>:</strong>
+                                <?php echo esc_html(number_format_i18n($hoursCount)); ?>
+                            </li>
+                            <li>
+                                <strong><?php echo esc_html__('Einträge mit VZE aus Stunden', 'bs-awo-jobs'); ?>:</strong>
+                                <?php echo esc_html(number_format_i18n($vzeFromHoursCount)); ?>
+                            </li>
+                            <li>
+                                <strong><?php echo esc_html__('Einträge mit VZE aus BA-Zeiteinteilung (ohne Stunden)', 'bs-awo-jobs'); ?>:</strong>
+                                <?php echo esc_html(number_format_i18n($vzeWithoutHoursCount)); ?>
+                            </li>
+                            <li>
+                                <strong><?php echo esc_html__('Einträge ohne VZE', 'bs-awo-jobs'); ?>:</strong>
+                                <?php echo esc_html(number_format_i18n($noVzeCount)); ?>
+                            </li>
+                        </ul>
+                    </div>
+                <?php endif; ?>
             </div>
             
             <?php
@@ -1078,17 +1494,153 @@ class StatsPage
             $label = (string) $entry['label'];
             $value = isset($entry['value']) ? (float) $entry['value'] : 0.0;
 
-            // Exakter Match auf den Rohwert aus der Excel-Spalte.
+            // Exakter Match auf den Rohwert aus der Excel-Spalte – aber nur dort,
+            // wo noch keine Stundenbasis gesetzt ist.
             $wpdb->query(
                 $wpdb->prepare(
                     "UPDATE {$table}
                      SET vze_wert = %f
-                     WHERE ba_zeiteinteilung_raw = %s",
+                     WHERE ba_zeiteinteilung_raw = %s
+                       AND (stunden_pro_woche IS NULL OR stunden_pro_woche <= 0)",
                     $value,
                     $label
                 )
             );
         }
+    }
+
+    /**
+     * Admin-Aktion: Stunden & VZE aus der JSON-API (bsawo_jobs_current.raw_json) nachziehen.
+     *
+     * @return void
+     */
+    public static function handle_sync_hours_from_api()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Keine Berechtigung.', 'bs-awo-jobs'));
+        }
+
+        check_admin_referer(self::NONCE_SYNC_HOURS_FROM_API);
+
+        global $wpdb;
+
+        if (! ($wpdb instanceof \wpdb)) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'             => 'bs-awo-jobs-stats',
+                        'tab'              => 'fluktuation',
+                        'bs_awo_hours_sync'=> 'no_tables',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        $jobsTable  = $wpdb->prefix . 'bsawo_jobs_current';
+        $statsTable = $wpdb->prefix . 'bs_awo_stats';
+
+        $jobsExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $jobsTable)) === $jobsTable;
+        $statsExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $statsTable)) === $statsTable;
+
+        if (! $jobsExists || ! $statsExists) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'             => 'bs-awo-jobs-stats',
+                        'tab'              => 'fluktuation',
+                        'bs_awo_hours_sync'=> 'no_tables',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        $jobs = $wpdb->get_results(
+            "SELECT job_id, work_time_model, raw_json FROM {$jobsTable}",
+            ARRAY_A
+        );
+
+        if (empty($jobs)) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'             => 'bs-awo-jobs-stats',
+                        'tab'              => 'fluktuation',
+                        'bs_awo_hours_sync'=> 'no_jobs',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        $fulltimeHours = (float) get_option(self::OPTION_FULLTIME_HOURS, 39.0);
+        if ($fulltimeHours <= 0) {
+            $fulltimeHours = 39.0;
+        }
+
+        $jobsWithHours = 0;
+        $updatedStats  = 0;
+
+        foreach ($jobs as $jobRow) {
+            $jobId = isset($jobRow['job_id']) ? (string) $jobRow['job_id'] : '';
+            if ($jobId === '') {
+                continue;
+            }
+
+            $workTimeModel = isset($jobRow['work_time_model']) ? (string) $jobRow['work_time_model'] : '';
+
+            $rawArray = [];
+            if (! empty($jobRow['raw_json']) && is_string($jobRow['raw_json'])) {
+                $decoded = json_decode($jobRow['raw_json'], true);
+                if (is_array($decoded)) {
+                    $rawArray = $decoded;
+                }
+            }
+
+            $hours = self::extract_hours_from_job($workTimeModel, $rawArray);
+            if ($hours === null || $hours <= 0) {
+                continue;
+            }
+
+            $jobsWithHours++;
+            $vze = $hours / $fulltimeHours;
+
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE {$statsTable}
+                     SET stunden_pro_woche = %f,
+                         stunden_quelle = %s,
+                         vze_wert = %f
+                     WHERE s_nr = %s",
+                    $hours,
+                    'api',
+                    $vze,
+                    $jobId
+                )
+            );
+
+            if ($wpdb->rows_affected > 0) {
+                $updatedStats += (int) $wpdb->rows_affected;
+            }
+        }
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'page'             => 'bs-awo-jobs-stats',
+                    'tab'              => 'fluktuation',
+                    'bs_awo_hours_sync'=> 'ok',
+                    'hours_jobs'       => $jobsWithHours,
+                    'hours_updates'    => $updatedStats,
+                ],
+                admin_url('admin.php')
+            )
+        );
+        exit;
     }
 
     /**
@@ -1118,6 +1670,85 @@ class StatsPage
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /**
+     * Extrahiert Wochenstunden aus einem Job-Datensatz (Zeitmodell + relevante Textfelder im raw_json).
+     *
+     * @param string $workTimeModel
+     * @param array  $rawJob
+     * @return float|null
+     */
+    private static function extract_hours_from_job($workTimeModel, array $rawJob)
+    {
+        $parts = [];
+
+        if ($workTimeModel !== '') {
+            $parts[] = (string) $workTimeModel;
+        }
+
+        $keys = ['Infos', 'Einleitungstext', 'Wirbieten'];
+        foreach ($keys as $key) {
+            if (! isset($rawJob[$key])) {
+                continue;
+            }
+            $val = $rawJob[$key];
+            if (is_array($val)) {
+                $val = implode(' ', array_map('trim', $val));
+            }
+            $val = trim((string) $val);
+            if ($val !== '') {
+                $parts[] = $val;
+            }
+        }
+
+        if (empty($parts)) {
+            return null;
+        }
+
+        $text = implode(' ', $parts);
+
+        return self::extract_hours_from_text($text);
+    }
+
+    /**
+     * Extrahiert die Wochenstunden aus einem Freitext.
+     *
+     * Strategie:
+     * - Alle Vorkommen von "<Zahl> Std./Stunden" suchen.
+     * - Den letzten gefundenen Wert verwenden (z. B. bei "25- bis 30 Std.").
+     *
+     * @param string $text
+     * @return float|null
+     */
+    private static function extract_hours_from_text($text)
+    {
+        $text = (string) $text;
+        if ($text === '') {
+            return null;
+        }
+
+        // Kommas in Dezimaltrennzeichen in Punkte umwandeln.
+        $text = str_replace(',', '.', $text);
+
+        $pattern = '/(\d{1,2}(?:\.\d{1,2})?)\s*(?:Std\.?|Stunden)/i';
+        if (! preg_match_all($pattern, $text, $matches)) {
+            return null;
+        }
+
+        $values = $matches[1];
+        if (empty($values)) {
+            return null;
+        }
+
+        $last = end($values);
+        $hours = (float) $last;
+
+        if ($hours <= 0 || $hours > 60) {
+            return null;
+        }
+
+        return $hours;
     }
 
     /**

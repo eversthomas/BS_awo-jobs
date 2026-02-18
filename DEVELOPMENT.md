@@ -16,17 +16,17 @@ Diese Datei dokumentiert den Fortschritt der größeren Entwicklungsphasen rund 
   - [x] Mapping S-Nr → `s_nr` (UNIQUE, ON DUPLICATE KEY UPDATE) und restliche Felder (inkl. zusammengeführter Ort/Adress-Infos).
   - [x] Testbar: Beispiel-Export kann hochgeladen und anschließend in `wp_bs_awo_stats` geprüft werden.
 
-- [ ] **Phase 3 – VZE-Mapping & Berechnungs-Logik**
-  - [ ] Options-Interface für BA-Zeiteinteilung → Dezimalwert (z. B. „Vollzeit“ = 1.0).
-  - [ ] Skript, das nach dem Import `vze_wert` gemäß Mapping berechnet.
-  - [ ] Test: Korrekte Dezimalwerte für Stichproben in der Datenbank.
+- [x] **Phase 3 – VZE-Mapping & Berechnungs-Logik**
+  - [x] Options-Interface für BA-Zeiteinteilung → Dezimalwert (z. B. „Vollzeit“ = 1.0).
+  - [x] Skript, das nach dem Import `vze_wert` gemäß Mapping berechnet (Update über `ba_zeiteinteilung_raw`).
+  - [x] Testbar: Mapping speichern, Excel neu importieren, VZE-Werte werden für passende Rohwerte aktualisiert.
 
-- [ ] **Phase 4 – Analyse-Dashboard (Chart.js)**
-  - [ ] Filter-UI (Zeitraum, internes Kürzel, Einrichtung) im Tab „Fluktuation“.
-  - [ ] Balkendiagramm: Summe VZE pro internem Fachbereich.
-  - [ ] Tortendiagramm: Verteilung Anstellungsarten.
-  - [ ] Kennzahl: „Gesamt offene VZE“.
-  - [ ] Test: Diagramme reagieren korrekt auf Filter.
+- [x] **Phase 4 – Analyse-Dashboard (Chart.js)**
+  - [x] Filter-UI (Zeitraum, internes Kürzel, Einrichtung) im Tab „Fluktuation“.
+  - [x] Balkendiagramm: Summe VZE pro internem Fachbereich (internes Kürzel).
+  - [x] Tortendiagramm: Verteilung der Anstellungsarten (nach VZE).
+  - [x] Kennzahl: „Gesamt offene VZE“ (gefiltert).
+  - [x] Testbar: Diagramme und Kennzahl reagieren auf Änderungen der Filter.
 
 - [ ] **Phase 5 – Reporting & Export (PDF/Excel)**
   - [ ] PDF-Export (Dompdf) für aktuelle Filteransicht mit AWO-Header, Datum, Kennzahlen.
