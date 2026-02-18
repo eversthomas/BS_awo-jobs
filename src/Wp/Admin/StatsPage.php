@@ -2,6 +2,10 @@
 
 namespace BsAwoJobs\Wp\Admin;
 
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
+
 if (! defined('ABSPATH')) {
     exit;
 }
@@ -17,7 +21,13 @@ class StatsPage
     {
         add_action('admin_menu', [self::class, 'register_menu']);
         add_action('admin_enqueue_scripts', [self::class, 'enqueue_assets']);
+        add_action('admin_post_bs_awo_jobs_import_stats', [self::class, 'handle_import_stats']);
     }
+
+    /**
+     * Nonce für den Fluktuations-Upload.
+     */
+    const NONCE_IMPORT_STATS = 'bs_awo_jobs_import_stats';
 
     /**
      * Registriert das Dashboard/Statistik-Submenü.
@@ -85,6 +95,7 @@ class StatsPage
         global $wpdb;
 
         $jobsTable        = $wpdb->prefix . 'bsawo_jobs_current';
+        $statsTable       = $wpdb->prefix . 'bs_awo_stats';
         $departmentSource = get_option(\BsAwoJobs\Wp\Admin\SettingsPage::OPTION_DEPARTMENT_SOURCE, 'api');
 
         // Tab aus URL für Persistenz bei Reload/Anwenden.
@@ -101,6 +112,13 @@ class StatsPage
 
         // Grund-Kennzahlen.
         $totalJobs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$jobsTable}");
+
+        // Basis-Kennzahl für Fluktuations-Upload.
+        $statsCount = null;
+        $statsTableExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $statsTable)) === $statsTable;
+        if ($statsTableExists) {
+            $statsCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$statsTable}");
+        }
 
         // Verteilung nach API-Fachbereich.
         $departmentsApi = $wpdb->get_results(
@@ -454,7 +472,107 @@ class StatsPage
             </div>
 
             <div class="bs-awo-jobs-tab-panel" data-bs-awo-jobs-panel="fluktuation"<?php echo $currentTab !== 'fluktuation' ? ' hidden' : ''; ?>>
-                <p class="description"><?php echo esc_html__('Hier können später neue Funktionen ergänzt werden.', 'bs-awo-jobs'); ?></p>
+                <?php
+                $importStatus = isset($_GET['bs_awo_stats_import']) ? sanitize_text_field(wp_unslash($_GET['bs_awo_stats_import'])) : '';
+                $inserted     = isset($_GET['inserted']) ? (int) $_GET['inserted'] : 0;
+                $updated      = isset($_GET['updated']) ? (int) $_GET['updated'] : 0;
+
+                if ($importStatus === 'ok') :
+                    ?>
+                    <div class="notice notice-success is-dismissible">
+                        <p>
+                            <?php
+                            echo esc_html(
+                                sprintf(
+                                    /* translators: 1: inserted rows, 2: updated rows */
+                                    __('Excel-Import erfolgreich: %1$d neue Zeilen, %2$d aktualisierte Zeilen.', 'bs-awo-jobs'),
+                                    $inserted,
+                                    $updated
+                                )
+                            );
+                            ?>
+                        </p>
+                    </div>
+                <?php elseif ($importStatus === 'no_file') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Es wurde keine Datei ausgewählt oder der Upload ist fehlgeschlagen.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php elseif ($importStatus === 'too_large') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Die Datei ist zu groß (max. 10 MB).', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php elseif ($importStatus === 'invalid_type') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Ungültiger Dateityp. Es sind nur .xlsx-Dateien erlaubt.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php elseif ($importStatus === 'missing_header') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Die Kopfzeile der Excel-Datei enthält nicht alle erforderlichen Spalten (mindestens „S-Nr“).', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php elseif ($importStatus === 'parse_error') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Die Excel-Datei konnte nicht gelesen werden. Bitte Struktur und Inhalt prüfen.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php elseif ($importStatus === 'no_table') : ?>
+                    <div class="notice notice-error is-dismissible">
+                        <p><?php echo esc_html__('Die Zieltabelle für Fluktuations-Statistiken (bs_awo_stats) existiert nicht.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php endif; ?>
+
+                <h2><?php echo esc_html__('Fluktuation – Excel-Import', 'bs-awo-jobs'); ?></h2>
+                <p class="description">
+                    <?php
+                    echo esc_html__(
+                        'Lade hier den Excel-Export aus der AWO-Stellenbörse hoch. Die Daten werden in die Tabelle bs_awo_stats geschrieben (S-Nr als eindeutiger Schlüssel).',
+                        'bs-awo-jobs'
+                    );
+                    ?>
+                </p>
+
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" enctype="multipart/form-data" style="margin-top: 1em;">
+                    <?php wp_nonce_field(self::NONCE_IMPORT_STATS); ?>
+                    <input type="hidden" name="action" value="bs_awo_jobs_import_stats" />
+
+                    <table class="form-table" role="presentation">
+                        <tr>
+                            <th scope="row">
+                                <label for="bs_awo_jobs_stats_file">
+                                    <?php echo esc_html__('Excel-Datei (.xlsx)', 'bs-awo-jobs'); ?>
+                                </label>
+                            </th>
+                            <td>
+                                <input
+                                    type="file"
+                                    id="bs_awo_jobs_stats_file"
+                                    name="bs_awo_jobs_stats_file"
+                                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                />
+                                <p class="description">
+                                    <?php
+                                    echo esc_html__(
+                                        'Erwartete Spalten (Kopfzeile): S-Nr, Erstellt am, Start, Stop, Titel, Fachbereich, Internes Kürzel, Einrichtung, Straße/Nr, PLZ, Einsatzort, Vertragsart, Anstellungsart.',
+                                        'bs-awo-jobs'
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <?php submit_button(__('Excel importieren', 'bs-awo-jobs'), 'primary'); ?>
+                </form>
+
+                <?php if ($statsTableExists) : ?>
+                    <hr />
+                    <h3><?php echo esc_html__('Aktueller Stand der Fluktuations-Daten', 'bs-awo-jobs'); ?></h3>
+                    <p>
+                        <strong><?php echo esc_html__('Einträge in bs_awo_stats', 'bs-awo-jobs'); ?>:</strong>
+                        <?php echo esc_html(number_format_i18n((int) $statsCount)); ?>
+                    </p>
+                    <p class="description">
+                        <?php echo esc_html__('Für Detailprüfungen kannst du die Tabelle bs_awo_stats direkt in der Datenbank ansehen.', 'bs-awo-jobs'); ?>
+                    </p>
+                <?php endif; ?>
             </div>
             
             <?php
@@ -463,5 +581,471 @@ class StatsPage
                 ?>
         </div>
         <?php
+    }
+
+    /**
+     * Verarbeitet den Excel-Upload für Fluktuations-Statistiken.
+     *
+     * Erwartet eine .xlsx-Datei mit Kopfzeile (erste Zeile) und den relevanten Spalten.
+     *
+     * @return void
+     */
+    public static function handle_import_stats()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Keine Berechtigung.', 'bs-awo-jobs'));
+        }
+
+        check_admin_referer(self::NONCE_IMPORT_STATS);
+
+        if (empty($_FILES['bs_awo_jobs_stats_file']['tmp_name']) || ! is_uploaded_file($_FILES['bs_awo_jobs_stats_file']['tmp_name'])) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'no_file',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        $file = $_FILES['bs_awo_jobs_stats_file'];
+
+        // Größenlimit (10 MB), um versehentliche Riesen-Uploads zu vermeiden.
+        $maxSize = 10 * 1024 * 1024;
+        if (isset($file['size']) && (int) $file['size'] > $maxSize) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'too_large',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        // Nur .xlsx erlauben (MIME + Dateiendung).
+        $allowedMimes = [
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/octet-stream', // einige PHP-Setups melden XLSX generisch als octet-stream
+        ];
+
+        $tmpName = $file['tmp_name'];
+        $mime    = '';
+
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime  = $finfo ? (string) finfo_file($finfo, $tmpName) : '';
+            if ($finfo) {
+                finfo_close($finfo);
+            }
+        }
+
+        $extension = '';
+        if (isset($file['name']) && is_string($file['name'])) {
+            $extension = strtolower((string) pathinfo($file['name'], PATHINFO_EXTENSION));
+        }
+
+        if ($extension !== 'xlsx' || ($mime !== '' && ! in_array($mime, $allowedMimes, true))) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'invalid_type',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        if (! class_exists(IOFactory::class)) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'parse_error',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'bs_awo_stats';
+        $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+
+        if ($exists !== $table) {
+            // Fallback: versuchen, die Tabelle über den Activation-Helper zu erzeugen.
+            if (class_exists('\BsAwoJobs\Wp\Activation')) {
+                \BsAwoJobs\Wp\Activation::ensure_stats_table();
+                $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+            }
+        }
+
+        if ($exists !== $table) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'no_table',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        try {
+            $spreadsheet = IOFactory::load($tmpName);
+            $sheet       = $spreadsheet->getActiveSheet();
+        } catch (\Throwable $e) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'parse_error',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        $highestRow    = (int) $sheet->getHighestRow();
+        $highestColumn = $sheet->getHighestColumn();
+        $highestColIdx = (int) Coordinate::columnIndexFromString($highestColumn);
+
+        if ($highestRow < 2) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'missing_header',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        // Kopfzeile (erste Zeile) einlesen und auf bekannte Spalten mappen.
+        $headerMap = [];
+        for ($col = 1; $col <= $highestColIdx; $col++) {
+            $rawHeader = (string) self::get_cell_value($sheet, $col, 1);
+            $normalized = self::normalize_header_label($rawHeader);
+            if ($normalized === '') {
+                continue;
+            }
+            $mapped = self::map_header_to_field($normalized);
+            if ($mapped !== null) {
+                $headerMap[$mapped] = $col;
+            }
+        }
+
+        // Mindestens S-Nr für s_nr muss vorhanden sein.
+        if (! isset($headerMap['s_nr'])) {
+            wp_safe_redirect(
+                add_query_arg(
+                    [
+                        'page'                => 'bs-awo-jobs-stats',
+                        'tab'                 => 'fluktuation',
+                        'bs_awo_stats_import' => 'missing_header',
+                    ],
+                    admin_url('admin.php')
+                )
+            );
+            exit;
+        }
+
+        $inserted = 0;
+        $updated  = 0;
+
+        for ($row = 2; $row <= $highestRow; $row++) {
+            $sNr = '';
+            if (isset($headerMap['s_nr'])) {
+                $sNr = trim((string) self::get_cell_value($sheet, $headerMap['s_nr'], $row));
+            }
+
+            if ($sNr === '') {
+                continue;
+            }
+
+            $erstelltAm  = isset($headerMap['erstellt_am'])
+                ? self::normalize_excel_datetime(self::get_cell_value($sheet, $headerMap['erstellt_am'], $row))
+                : null;
+            $startDate   = isset($headerMap['start_date'])
+                ? self::normalize_excel_datetime(self::get_cell_value($sheet, $headerMap['start_date'], $row))
+                : null;
+            $stopDate    = isset($headerMap['stop_date'])
+                ? self::normalize_excel_datetime(self::get_cell_value($sheet, $headerMap['stop_date'], $row))
+                : null;
+            $titel       = isset($headerMap['job_titel'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['job_titel'], $row))
+                : '';
+            $fachExt     = isset($headerMap['fachbereich_ext'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['fachbereich_ext'], $row))
+                : '';
+            $fachInt     = isset($headerMap['fachbereich_int'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['fachbereich_int'], $row))
+                : '';
+            $vertragsart = isset($headerMap['vertragsart'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['vertragsart'], $row))
+                : '';
+            $anstellungsart = isset($headerMap['anstellungsart'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['anstellungsart'], $row))
+                : '';
+            $einrichtung = isset($headerMap['einrichtung'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['einrichtung'], $row))
+                : '';
+
+            // Adressbestandteile ggf. zu einem Ort-String zusammenführen.
+            $strasse = isset($headerMap['strasse'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['strasse'], $row))
+                : '';
+            $plz     = isset($headerMap['plz'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['plz'], $row))
+                : '';
+            $einsatzort = isset($headerMap['einsatzort'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['einsatzort'], $row))
+                : '';
+
+            $ortParts = [];
+            if ($strasse !== '') {
+                $ortParts[] = $strasse;
+            }
+            $plzOrt = trim($plz . ' ' . $einsatzort);
+            if ($plzOrt !== '') {
+                $ortParts[] = $plzOrt;
+            }
+            $ort = implode(', ', $ortParts);
+
+            $sql = "
+                INSERT INTO {$table}
+                    (s_nr, erstellt_am, start_date, stop_date, job_titel, fachbereich_ext, fachbereich_int, vertragsart, anstellungsart, einrichtung, ort, vze_wert)
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %f)
+                ON DUPLICATE KEY UPDATE
+                    erstellt_am = VALUES(erstellt_am),
+                    start_date = VALUES(start_date),
+                    stop_date = VALUES(stop_date),
+                    job_titel = VALUES(job_titel),
+                    fachbereich_ext = VALUES(fachbereich_ext),
+                    fachbereich_int = VALUES(fachbereich_int),
+                    vertragsart = VALUES(vertragsart),
+                    anstellungsart = VALUES(anstellungsart),
+                    einrichtung = VALUES(einrichtung),
+                    ort = VALUES(ort)
+            ";
+
+            $prepared = $wpdb->prepare(
+                $sql,
+                $sNr,
+                $erstelltAm,
+                $startDate,
+                $stopDate,
+                $titel,
+                $fachExt,
+                $fachInt,
+                $vertragsart,
+                $anstellungsart,
+                $einrichtung,
+                $ort,
+                0.0 // vze_wert wird in Phase 3 befüllt
+            );
+
+            $wpdb->query($prepared);
+
+            $rowsAffected = (int) $wpdb->rows_affected;
+            if ($rowsAffected === 1) {
+                $inserted++;
+            } elseif ($rowsAffected === 2) {
+                $updated++;
+            }
+        }
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'page'                => 'bs-awo-jobs-stats',
+                    'tab'                 => 'fluktuation',
+                    'bs_awo_stats_import' => 'ok',
+                    'inserted'            => $inserted,
+                    'updated'             => $updated,
+                ],
+                admin_url('admin.php')
+            )
+        );
+        exit;
+    }
+
+    /**
+     * Liefert den Zellwert für eine Spalte/Zeile über ein Spaltenindex-Mapping.
+     * Verwendet Coordinate::stringFromColumnIndex(), um ältere PhpSpreadsheet-Versionen
+     * ohne getCellByColumnAndRow() zu unterstützen.
+     *
+     * @param mixed $sheet
+     * @param int   $columnIndex 1-basierter Spaltenindex
+     * @param int   $rowIndex    1-basierter Zeilenindex
+     * @return mixed
+     */
+    private static function get_cell_value($sheet, $columnIndex, $rowIndex)
+    {
+        $columnIndex = (int) $columnIndex;
+        $rowIndex    = (int) $rowIndex;
+
+        if ($columnIndex < 1 || $rowIndex < 1) {
+            return null;
+        }
+
+        $columnLetter = Coordinate::stringFromColumnIndex($columnIndex);
+        $coordinate   = $columnLetter . $rowIndex;
+
+        try {
+            return $sheet->getCell($coordinate)->getValue();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Normalisiert Headerlabels aus der Excel-Kopfzeile.
+     *
+     * @param string $label
+     * @return string
+     */
+    private static function normalize_header_label($label)
+    {
+        $label = (string) $label;
+        $label = trim($label);
+        if ($label === '') {
+            return '';
+        }
+
+        $label = mb_strtolower($label, 'UTF-8');
+        $label = str_replace(['ä', 'ö', 'ü', 'ß'], ['ae', 'oe', 'ue', 'ss'], $label);
+        $label = preg_replace('/\s+/', ' ', $label);
+
+        return (string) $label;
+    }
+
+    /**
+     * Mappt ein normalisiertes Headerlabel auf ein internes Feld.
+     *
+     * @param string $normalized
+     * @return string|null
+     */
+    private static function map_header_to_field($normalized)
+    {
+        $map = [
+            's-nr'               => 's_nr',
+            'snr'                => 's_nr',
+            's nr'               => 's_nr',
+            'stellennummer'      => 's_nr',
+            'erstellt am'        => 'erstellt_am',
+            'erstelldatum'       => 'erstellt_am',
+            'start'              => 'start_date',
+            'startdatum'         => 'start_date',
+            'start datum'        => 'start_date',
+            'stop'               => 'stop_date',
+            'stopdatum'          => 'stop_date',
+            'stop datum'         => 'stop_date',
+            'titel'              => 'job_titel',
+            'title'              => 'job_titel',
+            'stellenbezeichnung' => 'job_titel',
+            'fachbereich'        => 'fachbereich_ext',
+            'internes kuerzel'   => 'fachbereich_int',
+            'internes kürzel'    => 'fachbereich_int',
+            'internes kuerz'     => 'fachbereich_int',
+            'einrichtung'        => 'einrichtung',
+            'strasse/nr'         => 'strasse',
+            'straße/nr'          => 'strasse',
+            'strasse nr'         => 'strasse',
+            'straße nr'          => 'strasse',
+            'strasse'            => 'strasse',
+            'straße'             => 'strasse',
+            'plz'                => 'plz',
+            'einsatzort'         => 'einsatzort',
+            'ort'                => 'einsatzort',
+            'vertragsart'        => 'vertragsart',
+            'anstellungsart'     => 'anstellungsart',
+        ];
+
+        if (isset($map[$normalized])) {
+            return $map[$normalized];
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalisiert einen Zellwert als Datum/Zeit und gibt ein MySQL-DATETIME-Format zurück.
+     *
+     * @param mixed $value
+     * @return string|null
+     */
+    private static function normalize_excel_datetime($value)
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        // Numerischer Excel-Serienwert.
+        if (is_numeric($value)) {
+            try {
+                $dt = SpreadsheetDate::excelToDateTimeObject($value);
+                if ($dt instanceof \DateTimeInterface) {
+                    return $dt->format('Y-m-d H:i:s');
+                }
+            } catch (\Throwable $e) {
+                // Fallback auf unten.
+            }
+        }
+
+        // Bereits ein DateTime-Objekt?
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        // String-Parsen.
+        $str = trim((string) $value);
+        if ($str === '') {
+            return null;
+        }
+
+        $ts = strtotime($str);
+        if ($ts === false) {
+            return null;
+        }
+
+        return gmdate('Y-m-d H:i:s', $ts);
+    }
+
+    /**
+     * Normalisiert einen Zellwert als String (getrimmt).
+     *
+     * @param mixed $value
+     * @return string
+     */
+    private static function normalize_string_cell($value)
+    {
+        if ($value === null) {
+            return '';
+        }
+
+        return trim((string) $value);
     }
 }
