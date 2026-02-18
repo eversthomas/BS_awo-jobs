@@ -1,0 +1,8 @@
+{
+    "name": "bs-awo-jobs/bs-awo-jobs",
+    "description": "Analytik-Backend für AWO-Stellenanzeigen (JSON-Snapshots, Schema-Inspector, manuelle Syncs, Fluktuations-Analysen).",
+    "type": "wordpress-plugin",
+    "require": {
+        "phpoffice/phpspreadsheet": "^2.1"
+    }
+}

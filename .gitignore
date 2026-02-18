@@ -1,3 +1,31 @@
+# OS / Editor
 .DS_Store
-Archiv.zip
+Thumbs.db
+ehthumbs.db
+.idea/
+.vscode/
+.history/
+
+# Cursor / lokale Tools
 .cursorrules
+
+# Logs / Temp / Caches
+*.log
+*.tmp
+*.swp
+*.swo
+.phpunit.result.cache
+
+# Umgebungsdateien (falls du später welche nutzt)
+.env
+.env.*
+
+# Build-/Release-Artefakte
+*.zip
+*.tar
+*.tar.gz
+/dist/
+/build/
+
+# Lokale Archive
+Archiv.zip

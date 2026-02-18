@@ -31,6 +31,7 @@ class Activation
         $jobs_current_table  = $wpdb->prefix . 'bsawo_jobs_current';
         $events_table       = $wpdb->prefix . 'bsawo_events';
         $facilities_table   = $wpdb->prefix . 'bsawo_facilities';
+        $stats_table        = $wpdb->prefix . 'bs_awo_stats';
 
         $sql_runs = "CREATE TABLE {$runs_table} (
             id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -107,7 +108,26 @@ class Activation
         dbDelta($sql_events);
         dbDelta($sql_facilities);
 
-        update_option('bs_awo_jobs_db_version', 2);
+        $sql_stats = "CREATE TABLE {$stats_table} (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            s_nr VARCHAR(190) NOT NULL,
+            erstellt_am DATETIME NULL,
+            start_date DATETIME NULL,
+            stop_date DATETIME NULL,
+            job_titel TEXT NULL,
+            fachbereich_ext TEXT NULL,
+            fachbereich_int TEXT NULL,
+            vertragsart TEXT NULL,
+            anstellungsart TEXT NULL,
+            einrichtung TEXT NULL,
+            ort TEXT NULL,
+            vze_wert FLOAT DEFAULT 0,
+            UNIQUE KEY idx_s_nr (s_nr)
+        ) {$charset_collate};";
+
+        dbDelta($sql_stats);
+
+        update_option('bs_awo_jobs_db_version', 3);
     }
 
     /**
@@ -125,38 +145,43 @@ class Activation
         }
 
         $version = (int) get_option('bs_awo_jobs_db_version', 1);
-        if ($version >= 2) {
-            self::ensure_raw_json_column();
-            return;
-        }
 
-        $table = $wpdb->prefix . 'bsawo_events';
-        $cols  = $wpdb->get_results("SHOW COLUMNS FROM `{$table}`");
-        if (empty($cols)) {
-            update_option('bs_awo_jobs_db_version', 2);
-            return;
-        }
+        // Upgrade-Pfad von Version 1 -> 2 (bestehende Logik für bsawo_events).
+        if ($version < 2) {
+            $table = $wpdb->prefix . 'bsawo_events';
+            $cols  = $wpdb->get_results("SHOW COLUMNS FROM `{$table}`");
+            if (! empty($cols)) {
+                $colNames = [];
+                foreach ($cols as $c) {
+                    $colNames[] = $c->Field;
+                }
 
-        $colNames = [];
-        foreach ($cols as $c) {
-            $colNames[] = $c->Field;
-        }
+                $add = [
+                    'facility_id'       => 'ADD COLUMN facility_id CHAR(16) DEFAULT NULL',
+                    'jobfamily_id'      => 'ADD COLUMN jobfamily_id VARCHAR(10) DEFAULT NULL',
+                    'department_api_id' => 'ADD COLUMN department_api_id VARCHAR(10) DEFAULT NULL',
+                    'department_custom'=> 'ADD COLUMN department_custom VARCHAR(100) DEFAULT NULL',
+                ];
 
-        $add = [
-            'facility_id'       => 'ADD COLUMN facility_id CHAR(16) DEFAULT NULL',
-            'jobfamily_id'      => 'ADD COLUMN jobfamily_id VARCHAR(10) DEFAULT NULL',
-            'department_api_id' => 'ADD COLUMN department_api_id VARCHAR(10) DEFAULT NULL',
-            'department_custom'=> 'ADD COLUMN department_custom VARCHAR(100) DEFAULT NULL',
-        ];
-
-        foreach ($add as $name => $sql) {
-            if (! in_array($name, $colNames, true)) {
-                $wpdb->query("ALTER TABLE {$table} {$sql}");
+                foreach ($add as $name => $sql) {
+                    if (! in_array($name, $colNames, true)) {
+                        $wpdb->query("ALTER TABLE {$table} {$sql}");
+                    }
+                }
             }
+
+            update_option('bs_awo_jobs_db_version', 2);
+            $version = 2;
         }
 
-        update_option('bs_awo_jobs_db_version', 2);
+        // Sicherstellen, dass bsawo_jobs_current die Spalte raw_json hat.
         self::ensure_raw_json_column();
+
+        // Neue Stats-Tabelle für Fluktuations-Analysen ab Version 3.
+        if ($version < 3) {
+            self::ensure_stats_table();
+            update_option('bs_awo_jobs_db_version', 3);
+        }
     }
 
     /**
@@ -184,6 +209,49 @@ class Activation
         }
 
         $wpdb->query("ALTER TABLE `{$table}` ADD COLUMN raw_json LONGTEXT");
+    }
+
+    /**
+     * Stellt sicher, dass die Tabelle für Fluktuations-Statistiken existiert.
+     *
+     * @return void
+     */
+    public static function ensure_stats_table()
+    {
+        global $wpdb;
+
+        if (! ($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'bs_awo_stats';
+        $existing = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+        if ($existing === $table) {
+            return;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $sql_stats = "CREATE TABLE {$table} (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            s_nr VARCHAR(190) NOT NULL,
+            erstellt_am DATETIME NULL,
+            start_date DATETIME NULL,
+            stop_date DATETIME NULL,
+            job_titel TEXT NULL,
+            fachbereich_ext TEXT NULL,
+            fachbereich_int TEXT NULL,
+            vertragsart TEXT NULL,
+            anstellungsart TEXT NULL,
+            einrichtung TEXT NULL,
+            ort TEXT NULL,
+            vze_wert FLOAT DEFAULT 0,
+            UNIQUE KEY idx_s_nr (s_nr)
+        ) {$charset_collate};";
+
+        dbDelta($sql_stats);
     }
 }
 
