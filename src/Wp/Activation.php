@@ -121,13 +121,15 @@ class Activation
             anstellungsart TEXT NULL,
             einrichtung TEXT NULL,
             ort TEXT NULL,
+            ba_zeiteinteilung_raw TEXT NULL,
             vze_wert FLOAT DEFAULT 0,
             UNIQUE KEY idx_s_nr (s_nr)
         ) {$charset_collate};";
 
         dbDelta($sql_stats);
 
-        update_option('bs_awo_jobs_db_version', 3);
+        // Neue Installationen starten mit Schema-Version 4 (inkl. ba_zeiteinteilung_raw in bs_awo_stats).
+        update_option('bs_awo_jobs_db_version', 4);
     }
 
     /**
@@ -181,6 +183,13 @@ class Activation
         if ($version < 3) {
             self::ensure_stats_table();
             update_option('bs_awo_jobs_db_version', 3);
+            $version = 3;
+        }
+
+        // Ab Version 4: sicherstellen, dass bs_awo_stats die Spalte ba_zeiteinteilung_raw enthält.
+        if ($version < 4) {
+            self::ensure_stats_table();
+            update_option('bs_awo_jobs_db_version', 4);
         }
     }
 
@@ -225,10 +234,6 @@ class Activation
         }
 
         $table = $wpdb->prefix . 'bs_awo_stats';
-        $existing = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-        if ($existing === $table) {
-            return;
-        }
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
@@ -247,10 +252,12 @@ class Activation
             anstellungsart TEXT NULL,
             einrichtung TEXT NULL,
             ort TEXT NULL,
+            ba_zeiteinteilung_raw TEXT NULL,
             vze_wert FLOAT DEFAULT 0,
             UNIQUE KEY idx_s_nr (s_nr)
         ) {$charset_collate};";
 
+        // dbDelta legt die Tabelle an, falls sie fehlt, und ergänzt fehlende Spalten in bestehenden Tabellen.
         dbDelta($sql_stats);
     }
 }

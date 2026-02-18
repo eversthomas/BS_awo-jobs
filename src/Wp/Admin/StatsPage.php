@@ -13,6 +13,21 @@ if (! defined('ABSPATH')) {
 class StatsPage
 {
     /**
+     * Option-Key für VZE-Mapping (BA-Zeiteinteilung → Dezimalwert).
+     */
+    const OPTION_VZE_MAPPING = 'bs_awo_jobs_vze_mapping';
+
+    /**
+     * Nonce für den Fluktuations-Upload.
+     */
+    const NONCE_IMPORT_STATS = 'bs_awo_jobs_import_stats';
+
+    /**
+     * Nonce für das Speichern des VZE-Mappings.
+     */
+    const NONCE_SAVE_VZE_MAPPING = 'bs_awo_jobs_save_vze_mapping';
+
+    /**
      * Bootstrap.
      *
      * @return void
@@ -22,12 +37,8 @@ class StatsPage
         add_action('admin_menu', [self::class, 'register_menu']);
         add_action('admin_enqueue_scripts', [self::class, 'enqueue_assets']);
         add_action('admin_post_bs_awo_jobs_import_stats', [self::class, 'handle_import_stats']);
+        add_action('admin_post_bs_awo_jobs_save_vze_mapping', [self::class, 'handle_save_vze_mapping']);
     }
-
-    /**
-     * Nonce für den Fluktuations-Upload.
-     */
-    const NONCE_IMPORT_STATS = 'bs_awo_jobs_import_stats';
 
     /**
      * Registriert das Dashboard/Statistik-Submenü.
@@ -573,6 +584,86 @@ class StatsPage
                         <?php echo esc_html__('Für Detailprüfungen kannst du die Tabelle bs_awo_stats direkt in der Datenbank ansehen.', 'bs-awo-jobs'); ?>
                     </p>
                 <?php endif; ?>
+
+                <hr />
+
+                <?php
+                // VZE-Mapping-Status (Option).
+                $vzeMapping = get_option(self::OPTION_VZE_MAPPING, []);
+                if (! is_array($vzeMapping)) {
+                    $vzeMapping = [];
+                }
+
+                $vzeStatus = isset($_GET['bs_awo_vze_mapping']) ? sanitize_text_field(wp_unslash($_GET['bs_awo_vze_mapping'])) : '';
+
+                if ($vzeStatus === 'ok') :
+                    ?>
+                    <div class="notice notice-success is-dismissible">
+                        <p><?php echo esc_html__('VZE-Mapping wurde gespeichert.', 'bs-awo-jobs'); ?></p>
+                    </div>
+                <?php endif; ?>
+
+                <h3><?php echo esc_html__('VZE-Mapping (BA-Zeiteinteilung → Dezimalwert)', 'bs-awo-jobs'); ?></h3>
+                <p class="description">
+                    <?php
+                    echo esc_html__(
+                        'Trage hier die Rohwerte aus der Spalte „BA Zeiteinteilung“ ein (z. B. „Vollzeit“, „Teilzeit - flexibel“) und weise ihnen einen VZE-Wert zu (z. B. 1.0, 0.5).',
+                        'bs-awo-jobs'
+                    );
+                    ?>
+                </p>
+
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 1em; max-width: 640px;">
+                    <?php wp_nonce_field(self::NONCE_SAVE_VZE_MAPPING); ?>
+                    <input type="hidden" name="action" value="bs_awo_jobs_save_vze_mapping" />
+
+                    <table class="widefat striped">
+                        <thead>
+                            <tr>
+                                <th><?php echo esc_html__('BA Zeiteinteilung (Rohwert)', 'bs-awo-jobs'); ?></th>
+                                <th><?php echo esc_html__('VZE-Wert (Dezimalzahl)', 'bs-awo-jobs'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $rows = $vzeMapping;
+                            // Mindestens drei Zeilen anzeigen.
+                            $minRows = 3;
+                            $currentCount = is_countable($rows) ? count($rows) : 0;
+                            if ($currentCount < $minRows) {
+                                $rows = $rows + array_fill(0, $minRows - $currentCount, ['label' => '', 'value' => '']);
+                            }
+                            foreach ($rows as $entry) :
+                                $label = is_array($entry) && isset($entry['label']) ? (string) $entry['label'] : '';
+                                $value = is_array($entry) && isset($entry['value']) ? (string) $entry['value'] : '';
+                                ?>
+                                <tr>
+                                    <td>
+                                        <input
+                                            type="text"
+                                            name="bs_awo_jobs_vze_label[]"
+                                            value="<?php echo esc_attr($label); ?>"
+                                            class="regular-text"
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="text"
+                                            name="bs_awo_jobs_vze_value[]"
+                                            value="<?php echo esc_attr($value); ?>"
+                                            class="small-text"
+                                        />
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+
+                    <?php submit_button(__('VZE-Mapping speichern', 'bs-awo-jobs'), 'secondary', 'submit', false, ['style' => 'margin-top: 1em;']); ?>
+                    <p class="description">
+                        <?php echo esc_html__('Nach dem Speichern wird das Mapping beim nächsten Excel-Import für die Berechnung von vze_wert verwendet.', 'bs-awo-jobs'); ?>
+                    </p>
+                </form>
             </div>
             
             <?php
@@ -793,6 +884,9 @@ class StatsPage
             $stopDate    = isset($headerMap['stop_date'])
                 ? self::normalize_excel_datetime(self::get_cell_value($sheet, $headerMap['stop_date'], $row))
                 : null;
+            $baRaw       = isset($headerMap['ba_zeiteinteilung_raw'])
+                ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['ba_zeiteinteilung_raw'], $row))
+                : '';
             $titel       = isset($headerMap['job_titel'])
                 ? self::normalize_string_cell(self::get_cell_value($sheet, $headerMap['job_titel'], $row))
                 : '';
@@ -835,9 +929,9 @@ class StatsPage
 
             $sql = "
                 INSERT INTO {$table}
-                    (s_nr, erstellt_am, start_date, stop_date, job_titel, fachbereich_ext, fachbereich_int, vertragsart, anstellungsart, einrichtung, ort, vze_wert)
+                    (s_nr, erstellt_am, start_date, stop_date, job_titel, fachbereich_ext, fachbereich_int, vertragsart, anstellungsart, einrichtung, ort, ba_zeiteinteilung_raw, vze_wert)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %f)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %f)
                 ON DUPLICATE KEY UPDATE
                     erstellt_am = VALUES(erstellt_am),
                     start_date = VALUES(start_date),
@@ -848,7 +942,8 @@ class StatsPage
                     vertragsart = VALUES(vertragsart),
                     anstellungsart = VALUES(anstellungsart),
                     einrichtung = VALUES(einrichtung),
-                    ort = VALUES(ort)
+                    ort = VALUES(ort),
+                    ba_zeiteinteilung_raw = VALUES(ba_zeiteinteilung_raw)
             ";
 
             $prepared = $wpdb->prepare(
@@ -864,6 +959,7 @@ class StatsPage
                 $anstellungsart,
                 $einrichtung,
                 $ort,
+                $baRaw,
                 0.0 // vze_wert wird in Phase 3 befüllt
             );
 
@@ -876,6 +972,9 @@ class StatsPage
                 $updated++;
             }
         }
+
+        // Nach dem Import VZE-Werte gemäß Mapping berechnen.
+        self::recalculate_vze_values();
 
         wp_safe_redirect(
             add_query_arg(
@@ -890,6 +989,106 @@ class StatsPage
             )
         );
         exit;
+    }
+
+    /**
+     * Speichert das VZE-Mapping aus dem Formular.
+     *
+     * @return void
+     */
+    public static function handle_save_vze_mapping()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Keine Berechtigung.', 'bs-awo-jobs'));
+        }
+
+        check_admin_referer(self::NONCE_SAVE_VZE_MAPPING);
+
+        $labels = isset($_POST['bs_awo_jobs_vze_label']) && is_array($_POST['bs_awo_jobs_vze_label'])
+            ? array_map('wp_unslash', $_POST['bs_awo_jobs_vze_label'])
+            : [];
+        $values = isset($_POST['bs_awo_jobs_vze_value']) && is_array($_POST['bs_awo_jobs_vze_value'])
+            ? array_map('wp_unslash', $_POST['bs_awo_jobs_vze_value'])
+            : [];
+
+        $mapping = [];
+        $count   = max(count($labels), count($values));
+
+        for ($i = 0; $i < $count; $i++) {
+            $label = isset($labels[$i]) ? sanitize_text_field($labels[$i]) : '';
+            $value = isset($values[$i]) ? trim((string) $values[$i]) : '';
+
+            if ($label === '' || $value === '') {
+                continue;
+            }
+
+            // Dezimaltrennzeichen flexibel: Komma oder Punkt akzeptieren.
+            $normalizedValue = str_replace(',', '.', $value);
+            if (! is_numeric($normalizedValue)) {
+                continue;
+            }
+
+            $floatValue = (float) $normalizedValue;
+            $mapping[] = [
+                'label' => $label,
+                'value' => $floatValue,
+            ];
+        }
+
+        update_option(self::OPTION_VZE_MAPPING, $mapping);
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'page'               => 'bs-awo-jobs-stats',
+                    'tab'                => 'fluktuation',
+                    'bs_awo_vze_mapping' => 'ok',
+                ],
+                admin_url('admin.php')
+            )
+        );
+        exit;
+    }
+
+    /**
+     * Berechnet vze_wert in bs_awo_stats basierend auf dem gespeicherten Mapping.
+     *
+     * @return void
+     */
+    private static function recalculate_vze_values()
+    {
+        global $wpdb;
+
+        $mapping = get_option(self::OPTION_VZE_MAPPING, []);
+        if (! is_array($mapping) || empty($mapping)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'bs_awo_stats';
+        $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+        if ($exists !== $table) {
+            return;
+        }
+
+        foreach ($mapping as $entry) {
+            if (! is_array($entry) || empty($entry['label'])) {
+                continue;
+            }
+
+            $label = (string) $entry['label'];
+            $value = isset($entry['value']) ? (float) $entry['value'] : 0.0;
+
+            // Exakter Match auf den Rohwert aus der Excel-Spalte.
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE {$table}
+                     SET vze_wert = %f
+                     WHERE ba_zeiteinteilung_raw = %s",
+                    $value,
+                    $label
+                )
+            );
+        }
     }
 
     /**
@@ -980,6 +1179,9 @@ class StatsPage
             'plz'                => 'plz',
             'einsatzort'         => 'einsatzort',
             'ort'                => 'einsatzort',
+            'ba zeiteinteilung'  => 'ba_zeiteinteilung_raw',
+            'ba-zeiteinteilung'  => 'ba_zeiteinteilung_raw',
+            'ba zeiteinteilung (rohform)' => 'ba_zeiteinteilung_raw',
             'vertragsart'        => 'vertragsart',
             'anstellungsart'     => 'anstellungsart',
         ];
