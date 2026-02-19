@@ -1,0 +1,22 @@
+{
+    "name": "bezugssysteme/bs-awo-jobs",
+    "description": "AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode",
+    "type": "project",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "BsAwoJobs\\": "src/"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "7.4"
+        }
+    }
+}

@@ -12,3 +12,6 @@ Thumbs.db export-ignore
 .vscode/ export-ignore
 *.log export-ignore
 .phpunit.result.cache export-ignore
+/vendor/ export-ignore
+composer.lock export-ignore
+/tests/ export-ignore

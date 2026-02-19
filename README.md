@@ -48,6 +48,25 @@ Das Plugin kann die Stellenanzeigen automatisch über den **WordPress-Cron (WP-C
 | **„Sync wird bereits ausgeführt …“ obwohl kein Sync läuft** | Lock-Transient hängt (z. B. nach Abbruch oder Crash) | Lock läuft nach 10 Minuten automatisch ab. Sofort-Lösung: Plugin kurz deaktivieren und wieder aktivieren (entfernt den Lock). |
 | **„RENAME TABLE fehlgeschlagen (DB-Rechte?)“** | Datenbank-Benutzer hat keine Rechte für `RENAME TABLE` | Beim Hoster prüfen, ob der DB-User `ALTER`/`RENAME` auf die Tabellen hat. Bis dahin: aktuelle Daten bleiben unverändert; Sync schlägt fehl und meldet den Fehler im Backend. |
 
+## Tests
+
+Unit-Tests (PHPUnit) für z. B. Normalizer und Sync-Logik:
+
+```bash
+composer install
+./vendor/bin/phpunit
+```
+
+## Übersetzungen
+
+Die Text-Domain ist `bs-awo-jobs`. Im Ordner `languages/` liegt eine Vorlage `bs-awo-jobs.pot`. Für eine vollständige Aktualisierung der Übersetzungsvorlage (z. B. nach Code-Änderungen) kann [WP-CLI](https://wp-cli.org/) genutzt werden:
+
+```bash
+wp i18n make-pot wp-content/plugins/BS_awo-jobs wp-content/plugins/BS_awo-jobs/languages/bs-awo-jobs.pot --domain=bs-awo-jobs
+```
+
+Sprachdateien (z. B. `bs-awo-jobs-de_DE.po` / `.mo`) in denselben Ordner legen; WordPress lädt sie automatisch.
+
 ## Release-ZIP / Distribution
 
 Für ein sauberes Release-ZIP (ohne `__MACOSX/`, `.DS_Store` usw.) wird `.gitattributes` mit `export-ignore` genutzt. Beim Archivieren mit `git archive` oder beim Export über GitHub Releases werden diese Dateien/Ordner automatisch ausgeschlossen.

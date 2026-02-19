@@ -2,7 +2,7 @@
 
 namespace BsAwoJobs\Wp;
 
-use wpdb;
+use \wpdb;
 
 if (! defined('ABSPATH')) {
     exit;
@@ -21,7 +21,7 @@ class Activation
     {
         global $wpdb;
 
-        if (! ($wpdb instanceof wpdb)) {
+        if (! ($wpdb instanceof \wpdb)) {
             return;
         }
 
@@ -93,7 +93,7 @@ class Activation
     {
         global $wpdb;
 
-        if (! ($wpdb instanceof wpdb)) {
+        if (! ($wpdb instanceof \wpdb)) {
             return;
         }
 
@@ -130,7 +130,7 @@ class Activation
     {
         global $wpdb;
 
-        if (! ($wpdb instanceof wpdb)) {
+        if (! ($wpdb instanceof \wpdb)) {
             return;
         }
 
@@ -158,7 +158,7 @@ class Activation
     {
         global $wpdb;
 
-        if (! ($wpdb instanceof wpdb)) {
+        if (! ($wpdb instanceof \wpdb)) {
             return;
         }
 
@@ -185,7 +185,7 @@ class Activation
     {
         global $wpdb;
 
-        if (! ($wpdb instanceof wpdb)) {
+        if (! ($wpdb instanceof \wpdb)) {
             return;
         }
 
@@ -215,7 +215,7 @@ class Activation
     {
         global $wpdb;
 
-        if (! ($wpdb instanceof wpdb)) {
+        if (! ($wpdb instanceof \wpdb)) {
             return;
         }
 

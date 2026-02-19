@@ -81,6 +81,9 @@ class SyncService
             $result = [];
         }
 
+        // API kann Root-Array oder Wrapper-Objekt liefern (z. B. { "Stellen": [ ... ] }).
+        $result = self::extractJobsArray($result);
+
         $runId = RunsRepository::store(null, $result, 'success', '');
         $stored = JobsRepository::storeJobsCurrent($runId, $result);
 
@@ -112,6 +115,35 @@ class SyncService
             ),
             'jobs_count'  => count($result),
         ];
+    }
+
+    /**
+     * Extrahiert das Stellen-Array aus der API-Antwort.
+     * Unterstützt sowohl Root-Array [ { Stellennummer, ... }, ... ] als auch
+     * Wrapper-Objekt z. B. { "Stellen": [ ... ] }, { "data": [ ... ] }, { "jobs": [ ... ] }.
+     *
+     * @param array $data
+     * @return array
+     */
+    private static function extractJobsArray(array $data)
+    {
+        if (empty($data)) {
+            return [];
+        }
+
+        // Bereits numerisch indiziertes Array (Root = Liste der Stellen).
+        if (array_keys($data) === range(0, count($data) - 1)) {
+            return $data;
+        }
+
+        $wrapperKeys = ['Stellen', 'stellen', 'data', 'jobs', 'items'];
+        foreach ($wrapperKeys as $key) {
+            if (isset($data[$key]) && is_array($data[$key])) {
+                return $data[$key];
+            }
+        }
+
+        return $data;
     }
 
     /**

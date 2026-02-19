@@ -20,6 +20,9 @@ ehthumbs.db
 .env
 .env.*
 
+# Composer
+/vendor/
+
 # Build-/Release-Artefakte
 *.zip
 *.tar

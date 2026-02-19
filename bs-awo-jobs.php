@@ -1,13 +1,13 @@
 <?php
 /**
  * Plugin Name:       BS AWO Jobs
- * Plugin URI:        https://github.com/your-repo/BS_awo-jobs
+ * Plugin URI:        https://bezugssysteme.de
  * Description:       AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode mit konfigurierbarem Design.
  * Version:           2.0
  * Author:            Tom Evers
  * Requires at least: 5.9
  * Requires PHP:      7.4
- * Tested up to:      6.4
+ * Tested up to:      6.7
  * Text Domain:       bs-awo-jobs
  * Domain Path:       /languages
  */

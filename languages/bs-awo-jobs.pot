@@ -1,0 +1,75 @@
+# Copyright (C) 2025 Tom Evers / Bezugssysteme
+# This file is distributed under the same license as the BS AWO Jobs plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: BS AWO Jobs 2.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-02-19 00:00+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Domain: bs-awo-jobs\n"
+
+#: bs-awo-jobs.php (Plugin Header)
+msgid "BS AWO Jobs"
+msgstr ""
+
+#: bs-awo-jobs.php (Plugin Header)
+msgid "AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode mit konfigurierbarem Design."
+msgstr ""
+
+#: src/Core/SyncService.php
+msgid "Sync wird bereits ausgeführt oder wurde kürzlich gestartet."
+msgstr ""
+
+#: src/Core/SyncService.php
+msgid "Sync fehlgeschlagen: %s"
+msgstr ""
+
+#: src/Core/SyncService.php
+msgid "Sync erfolgreich. %d Jobs übernommen."
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Stellenangebote"
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Filter für Stellenangebote"
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Filtern"
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Filter zurücksetzen"
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Weiterlesen"
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Zurück zur Übersicht"
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Stelle nicht gefunden."
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Keine Stellen entsprechen den gewählten Filtern."
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Stellenangebote werden derzeit aktualisiert. Bitte später erneut vorbeischauen."
+msgstr ""
+
+#: src/Wp/Shortcodes/JobBoard.php
+msgid "Filter konnten nicht geladen werden. Seite wird neu geladen."
+msgstr ""
