@@ -164,7 +164,10 @@ class SettingsPage
                                 <option value="twicedaily" <?php selected($cronSchedule, 'twicedaily'); ?>><?php echo esc_html__('Alle 12 Stunden', 'bs-awo-jobs'); ?></option>
                                 <option value="daily" <?php selected($cronSchedule, 'daily'); ?>><?php echo esc_html__('Täglich', 'bs-awo-jobs'); ?></option>
                             </select>
-                            <p class="description"><?php echo esc_html__('Sync per WP-Cron im Hintergrund (nur wenn „Jetzt synchronisieren“ mindestens einmal ausgeführt wurde).', 'bs-awo-jobs'); ?></p>
+                            <p class="description"><?php echo esc_html__('Dieses Plugin kann die Stellenanzeigen automatisch über den WordPress-Cron („WP-Cron“) aktualisieren. WP-Cron ist kein echter Server-Cron, sondern wird in der Regel bei Seitenaufrufen ausgelöst. Auf Websites mit regelmäßigen Zugriffen ist das in der Praxis meist ausreichend.', 'bs-awo-jobs'); ?></p>
+                            <p class="description"><strong><?php echo esc_html__('Empfehlung:', 'bs-awo-jobs'); ?></strong> <?php echo esc_html__('Stelle die Synchronisierung auf 2× täglich (z. B. alle 12 Stunden).', 'bs-awo-jobs'); ?></p>
+                            <p class="description"><?php echo esc_html__('Wenn deine Website nur wenige Zugriffe hat, kann es sein, dass WP-Cron seltener läuft. In diesem Fall: führe den Sync regelmäßig manuell im Backend aus oder lasse einen echten Server-Cron einrichten, der WP-Cron zuverlässig anstößt.', 'bs-awo-jobs'); ?></p>
+                            <p class="description"><?php echo esc_html__('Hinweis: Du siehst im Backend jederzeit, wann der letzte Sync gelaufen ist und ob er erfolgreich war.', 'bs-awo-jobs'); ?></p>
                         </td>
                     </tr>
                 </table>
