@@ -70,6 +70,26 @@ class RunsRepository
     }
 
     /**
+     * Markiert den Run des aktuellen Tages als fehlgeschlagen (z. B. nach RENAME TABLE Fehler).
+     *
+     * @param string $errorMessage
+     * @return void
+     */
+    public static function markRunFailed($errorMessage)
+    {
+        global $wpdb;
+        $table = $wpdb->prefix . 'bsawo_runs';
+        $runDate = current_time('Y-m-d');
+        $wpdb->update(
+            $table,
+            ['status' => 'failed', 'error_message' => $errorMessage],
+            ['run_date' => $runDate],
+            ['%s', '%s'],
+            ['%s']
+        );
+    }
+
+    /**
      * Leert die Runs-Tabelle.
      *
      * @return void

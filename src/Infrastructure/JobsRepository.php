@@ -18,10 +18,11 @@ class JobsRepository
      * Schreibt die aktuelle Jobliste in bsawo_jobs_current.
      * Staging + Swap: Schreiben in bsawo_jobs_staging, dann atomarer Tausch – Frontend sieht keine leere Tabelle.
      * Ein Job = ein INSERT inkl. raw_json (kein Folge-UPDATE).
+     * Bei RENAME-Fehler: Live-Daten unangetastet, Sync als failed markieren, false zurückgeben (kein Fallback-Downtime).
      *
      * @param int   $runId
      * @param array $jobs
-     * @return void
+     * @return bool true bei Erfolg, false wenn RENAME TABLE fehlschlägt (DB-Rechte)
      */
     public static function storeJobsCurrent($runId, array $jobs)
     {
@@ -141,12 +142,22 @@ class JobsRepository
         }
 
         // Atomarer Swap: Staging wird zur aktuellen Tabelle, Frontend sieht keine leere Phase.
+        // Bei Fehler: Live-Tabelle unangetastet lassen, Sync als failed markieren (kein TRUNCATE+INSERT-Fallback).
         $oldTable = $wpdb->prefix . 'bsawo_jobs_old';
-        $wpdb->query("RENAME TABLE `{$currentTable}` TO `{$oldTable}`, `{$stagingTable}` TO `{$currentTable}`");
+        $renamed = $wpdb->query("RENAME TABLE `{$currentTable}` TO `{$oldTable}`, `{$stagingTable}` TO `{$currentTable}`");
+        if ($renamed === false || $wpdb->last_error !== '') {
+            $msg = __('RENAME TABLE fehlgeschlagen (DB-Rechte?). Aktuelle Daten unverändert.', 'bs-awo-jobs');
+            update_option('bs_awo_jobs_last_sync_error', $msg, false);
+            update_option('bs_awo_jobs_last_sync_status', 'failed', false);
+            update_option('bs_awo_jobs_sync_rename_failed', time(), false);
+            return false;
+        }
+
         $wpdb->query("DROP TABLE IF EXISTS `{$oldTable}`");
         \BsAwoJobs\Wp\Activation::ensure_jobs_staging_table();
 
         self::invalidateFilterCache();
+        return true;
     }
 
     /**

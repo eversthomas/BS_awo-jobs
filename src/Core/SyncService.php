@@ -82,7 +82,23 @@ class SyncService
         }
 
         $runId = RunsRepository::store(null, $result, 'success', '');
-        JobsRepository::storeJobsCurrent($runId, $result);
+        $stored = JobsRepository::storeJobsCurrent($runId, $result);
+
+        if ($stored === false) {
+            $renameError = get_option('bs_awo_jobs_last_sync_error', '');
+            $msg = $renameError !== '' ? $renameError : __('RENAME TABLE fehlgeschlagen (DB-Rechte?).', 'bs-awo-jobs');
+            RunsRepository::markRunFailed($msg);
+            self::storeLastSyncMeta(0, 0, 'failed', $msg);
+            return [
+                'status'     => 'failed',
+                'message'    => sprintf(
+                    /* translators: %s: Fehlernachricht */
+                    __('Sync fehlgeschlagen: %s', 'bs-awo-jobs'),
+                    $msg
+                ),
+                'jobs_count' => 0,
+            ];
+        }
 
         $duration = (int) round(microtime(true) - $start);
         self::storeLastSyncMeta(count($result), $duration, 'success', '');

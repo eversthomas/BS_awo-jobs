@@ -84,6 +84,20 @@ register_activation_hook(
     }
 );
 
+// Deaktivierung: Cron und Lock aufräumen (Strings, keine Klassen – robust bei Refactor).
+register_deactivation_hook(
+    __FILE__,
+    function () {
+        wp_clear_scheduled_hook('bsawo_jobs_sync_event');
+        delete_transient('bsawo_jobs_sync_lock');
+        // Optionale Sync-Metadaten zurücksetzen (vermeidet veraltete "failed"-Anzeige nach Reaktivierung).
+        delete_option('bs_awo_jobs_last_sync_duration_sec');
+        delete_option('bs_awo_jobs_last_sync_status');
+        delete_option('bs_awo_jobs_last_sync_error');
+        delete_option('bs_awo_jobs_sync_rename_failed');
+    }
+);
+
 // Initialisierung.
 add_action(
     'plugins_loaded',
