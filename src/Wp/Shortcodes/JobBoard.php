@@ -37,6 +37,7 @@ class JobBoard
                 'jobfamily'          => '',
                 'vertragsart'        => '',
                 'ort'                => '',
+                'paged'              => 0,
                 'hide_filters'       => 0,
                 'hide_layout_toggle' => 0,
             ],
@@ -114,6 +115,8 @@ class JobBoard
         $fachbereich = $atts['fachbereich'] !== '' ? $atts['fachbereich'] : (isset($_GET['fachbereich']) ? sanitize_text_field(wp_unslash($_GET['fachbereich'])) : '');
         $jobfamily   = $atts['jobfamily'] !== '' ? $atts['jobfamily'] : (isset($_GET['jobfamily']) ? sanitize_text_field(wp_unslash($_GET['jobfamily'])) : '');
         $vertragsart = $atts['vertragsart'] !== '' ? $atts['vertragsart'] : (isset($_GET['vertragsart']) ? sanitize_text_field(wp_unslash($_GET['vertragsart'])) : '');
+        // paged: aus $atts (AJAX) oder aus Request (Seitenaufruf)
+        $paged_param = isset($atts['paged']) && (int) $atts['paged'] > 0 ? (int) $atts['paged'] : null;
 
         // Department-Spalte: Mandantenfeld → department_custom; API + numerischer fachbereich → department_api_id; API + Bezeichnung → department_api (UX-intuitiv).
         $deptSource = get_option(SettingsPage::OPTION_DEPARTMENT_SOURCE, 'api');
@@ -132,7 +135,9 @@ class JobBoard
         $hide_layout_toggle = !empty($atts['hide_layout_toggle']);
 
 
-        $current_page = (int) get_query_var('paged', 0);
+        $current_page = $paged_param !== null
+            ? $paged_param
+            : (int) get_query_var('paged', 0);
         if ($current_page < 1 && isset($_GET['paged'])) {
             $current_page = max(1, (int) $_GET['paged']);
         }
@@ -275,8 +280,8 @@ class JobBoard
             ?>
             <?php if (!$hide_layout_toggle): ?>
 			<div class="bs-awo-jobs-layout-toggle">
-                <a href="<?php echo esc_url($list_url); ?>" class="<?php echo $layoutParam === 'list' ? 'active' : ''; ?>"><?php echo esc_html__('Liste', 'bs-awo-jobs'); ?></a>
-                <a href="<?php echo esc_url($grid_url); ?>" class="<?php echo $layoutParam === 'grid' ? 'active' : ''; ?>"><?php echo esc_html__('Kacheln', 'bs-awo-jobs'); ?></a>
+                <a href="<?php echo esc_url($list_url); ?>" class="<?php echo esc_attr($layoutParam === 'list' ? 'active' : ''); ?>"><?php echo esc_html__('Liste', 'bs-awo-jobs'); ?></a>
+                <a href="<?php echo esc_url($grid_url); ?>" class="<?php echo esc_attr($layoutParam === 'grid' ? 'active' : ''); ?>"><?php echo esc_html__('Kacheln', 'bs-awo-jobs'); ?></a>
             </div>
             <?php endif; ?>
 
@@ -832,8 +837,8 @@ class JobBoard
 
             // Orte: aus Einsatzort und facility_address – alle Zeilen durchgehen (OBJECT, nicht OBJECT_K, sonst gehen Orte verloren).
             $orte = [];
-            $hasEinsatzortCol = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", 'einsatzort'));
-            if (! empty($hasEinsatzortCol)) {
+            $hasEinsatzortCol = \BsAwoJobs\Wp\Activation::has_einsatzort_column();
+            if ($hasEinsatzortCol) {
                 $rows = $wpdb->get_results(
                     "SELECT facility_address, einsatzort FROM `{$table}` WHERE (facility_address IS NOT NULL AND facility_address <> '') OR (einsatzort IS NOT NULL AND einsatzort <> '')",
                     OBJECT

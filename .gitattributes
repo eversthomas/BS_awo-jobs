@@ -1,0 +1,14 @@
+# Release-ZIP: Finder-/OS-Artefakte und Dev-Dateien ausschließen
+.DS_Store export-ignore
+__MACOSX/ export-ignore
+Thumbs.db export-ignore
+.git export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+.cursorrules export-ignore
+.cursor/ export-ignore
+.history/ export-ignore
+.idea/ export-ignore
+.vscode/ export-ignore
+*.log export-ignore
+.phpunit.result.cache export-ignore

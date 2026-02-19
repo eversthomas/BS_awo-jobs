@@ -1,7 +1,6 @@
 <?php
 /**
  * Plugin Name:       BS AWO Jobs
- * Plugin URI:        https://example.com/
  * Description:       AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode mit konfigurierbarem Design.
  * Version:           0.1.0
  * Author:            Tom Evers
@@ -23,18 +22,11 @@ define('BS_AWO_JOBS_MENU_SLUG', 'bs-awo-jobs');
 define('BS_AWO_JOBS_DEFAULT_API_URL', 'https://www.awo-jobs.de/stellenboerse-wesel.json');
 
 /**
- * AJAX-Handler für Frontend-Filter: setzt $_GET aus POST und rendert JobBoard (ohne Reload).
+ * AJAX-Handler für Frontend-Filter: Parameter aus POST bauen, JobBoard mit Param-Array rendern (ohne $_GET-Mutation).
  */
 function bs_awo_jobs_ajax_filter()
 {
-    check_ajax_referer('bs_awo_jobs_filter');
-
-    $_GET['ort']         = isset($_POST['ort']) ? sanitize_text_field(wp_unslash($_POST['ort'])) : '';
-    $_GET['fachbereich'] = isset($_POST['fachbereich']) ? sanitize_text_field(wp_unslash($_POST['fachbereich'])) : '';
-    $_GET['jobfamily']   = isset($_POST['jobfamily']) ? sanitize_text_field(wp_unslash($_POST['jobfamily'])) : '';
-    $_GET['vertragsart'] = isset($_POST['vertragsart']) ? sanitize_text_field(wp_unslash($_POST['vertragsart'])) : '';
-    $_GET['layout']      = isset($_POST['layout']) ? sanitize_text_field(wp_unslash($_POST['layout'])) : '';
-    $_GET['paged']       = isset($_POST['paged']) ? max(1, (int) $_POST['paged']) : 1;
+    check_ajax_referer('bs_awo_jobs_filter', 'nonce');
 
     $base_url = '';
     if (! empty($_POST['base_url']) && is_string($_POST['base_url'])) {
@@ -45,10 +37,11 @@ function bs_awo_jobs_ajax_filter()
     $atts = [
         'limit'       => isset($_POST['limit']) ? max(1, min(100, (int) $_POST['limit'])) : 10,
         'layout'      => isset($_POST['layout']) ? sanitize_text_field(wp_unslash($_POST['layout'])) : 'list',
-        'ort'         => $_GET['ort'],
-        'fachbereich' => $_GET['fachbereich'],
-        'jobfamily'   => $_GET['jobfamily'],
-        'vertragsart' => $_GET['vertragsart'],
+        'ort'         => isset($_POST['ort']) ? sanitize_text_field(wp_unslash($_POST['ort'])) : '',
+        'fachbereich' => isset($_POST['fachbereich']) ? sanitize_text_field(wp_unslash($_POST['fachbereich'])) : '',
+        'jobfamily'   => isset($_POST['jobfamily']) ? sanitize_text_field(wp_unslash($_POST['jobfamily'])) : '',
+        'vertragsart' => isset($_POST['vertragsart']) ? sanitize_text_field(wp_unslash($_POST['vertragsart'])) : '',
+        'paged'       => isset($_POST['paged']) ? max(1, (int) $_POST['paged']) : 1,
     ];
     if ($base_url !== null) {
         $atts['_base_url'] = $base_url;
@@ -82,12 +75,11 @@ register_activation_hook(
             return;
         }
 
-        if (! class_exists('\BsAwoJobs\Wp\Activation')) {
-            // Autoloader sollte dies eigentlich abdecken, falls Datei existiert.
-        }
-
         if (class_exists('\BsAwoJobs\Wp\Activation')) {
             \BsAwoJobs\Wp\Activation::activate();
+        }
+        if (class_exists('\BsAwoJobs\Wp\Cron')) {
+            \BsAwoJobs\Wp\Cron::reschedule();
         }
     }
 );
@@ -112,6 +104,9 @@ add_action(
         if (class_exists('\BsAwoJobs\Wp\Activation')) {
             \BsAwoJobs\Wp\Activation::maybe_upgrade();
         }
+
+        // WP-Cron: automatischer Sync (optional)
+        add_action(\BsAwoJobs\Wp\Cron::HOOK_SYNC_EVENT, [\BsAwoJobs\Wp\Cron::class, 'run_sync_cron']);
 
         // Frontend-Shortcode [bs_awo_jobs]
         add_shortcode('bs_awo_jobs', [\BsAwoJobs\Wp\Shortcodes\JobBoard::class, 'render']);

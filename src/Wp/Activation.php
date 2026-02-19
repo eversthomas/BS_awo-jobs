@@ -73,13 +73,52 @@ class Activation
             INDEX idx_dept_api (department_api_id),
             INDEX idx_dept_custom (department_custom),
             INDEX idx_jobfamily (jobfamily_id),
+            INDEX idx_contract_type (contract_type),
             INDEX idx_einsatzort (einsatzort(100))
         ) {$charset_collate};";
 
         dbDelta($sql_runs);
         dbDelta($sql_jobs_current);
 
+        self::ensure_jobs_staging_table();
         update_option('bs_awo_jobs_db_version', 3);
+    }
+
+    /**
+     * Stellt sicher, dass die Staging-Tabelle für atomaren Swap existiert (gleiche Struktur wie bsawo_jobs_current).
+     *
+     * @return void
+     */
+    public static function ensure_jobs_staging_table()
+    {
+        global $wpdb;
+
+        if (! ($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $current = $wpdb->prefix . 'bsawo_jobs_current';
+        $staging = $wpdb->prefix . 'bsawo_jobs_staging';
+
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $current)) !== $current) {
+            return;
+        }
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $staging)) === $staging) {
+            return;
+        }
+
+        $wpdb->query("CREATE TABLE `{$staging}` LIKE `{$current}`");
+    }
+
+    /**
+     * Ob die Tabelle bsawo_jobs_current die Spalte einsatzort hat (Schema-Version >= 3).
+     * Vermeidet SHOW COLUMNS auf dem Request-Pfad.
+     *
+     * @return bool
+     */
+    public static function has_einsatzort_column()
+    {
+        return (int) get_option('bs_awo_jobs_db_version', 1) >= 3;
     }
 
     /**
@@ -99,6 +138,8 @@ class Activation
 
         self::ensure_raw_json_column();
         self::ensure_einsatzort_columns();
+        self::ensure_jobs_staging_table();
+        self::ensure_contract_type_index();
 
         if ($version < 2) {
             update_option('bs_awo_jobs_db_version', 2);
@@ -163,5 +204,31 @@ class Activation
         if ($add) {
             $wpdb->query("ALTER TABLE `{$table}` " . implode(', ', $add));
         }
+    }
+
+    /**
+     * Stellt sicher, dass auf contract_type ein Index existiert (Filter-Performance).
+     *
+     * @return void
+     */
+    public static function ensure_contract_type_index()
+    {
+        global $wpdb;
+
+        if (! ($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'bsawo_jobs_current';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+            return;
+        }
+
+        $indexes = $wpdb->get_results("SHOW INDEX FROM `{$table}` WHERE Key_name = 'idx_contract_type'");
+        if (! empty($indexes)) {
+            return;
+        }
+
+        $wpdb->query("ALTER TABLE `{$table}` ADD INDEX idx_contract_type (contract_type)");
     }
 }

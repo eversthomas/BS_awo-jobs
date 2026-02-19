@@ -2,8 +2,8 @@
 
 namespace BsAwoJobs\Wp\Admin;
 
-use BsAwoJobs\Core\Normalizer;
-use WP_Error;
+use BsAwoJobs\Infrastructure\JobsRepository;
+use BsAwoJobs\Infrastructure\RunsRepository;
 
 if (! defined('ABSPATH')) {
     exit;
@@ -11,9 +11,10 @@ if (! defined('ABSPATH')) {
 
 class SettingsPage
 {
-    const OPTION_API_URL           = 'bs_awo_jobs_api_url';
-    const OPTION_DEPARTMENT_SOURCE = 'bs_awo_jobs_department_source';
-    const OPTION_LAST_SYNC_MESSAGE = 'bs_awo_jobs_last_sync_message';
+    const OPTION_API_URL            = 'bs_awo_jobs_api_url';
+    const OPTION_DEPARTMENT_SOURCE  = 'bs_awo_jobs_department_source';
+    const OPTION_LAST_SYNC_MESSAGE  = 'bs_awo_jobs_last_sync_message';
+    const OPTION_CRON_SCHEDULE      = 'bs_awo_jobs_cron_schedule';
     const NONCE_SAVE_SETTINGS      = 'bs_awo_jobs_save_settings';
     const NONCE_SYNC_NOW           = 'bs_awo_jobs_sync_now';
     const NONCE_RESET              = 'bs_awo_jobs_reset_data';
@@ -72,10 +73,7 @@ class SettingsPage
         $tableExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $jobsTable)) === $jobsTable;
         $runsExists  = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $runsTable)) === $runsTable;
 
-        $hasEinsatzortCol = false;
-        if ($tableExists) {
-            $hasEinsatzortCol = ! empty($wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM `{$jobsTable}` LIKE %s", 'einsatzort')));
-        }
+        $hasEinsatzortCol = $tableExists && \BsAwoJobs\Wp\Activation::has_einsatzort_column();
 
         $activeJobs = 0;
         $lastRun    = null;
@@ -154,6 +152,21 @@ class SettingsPage
                             </fieldset>
                         </td>
                     </tr>
+                    <tr>
+                        <th scope="row"><?php echo esc_html__('Automatischer Sync', 'bs-awo-jobs'); ?></th>
+                        <td>
+                            <?php
+                            $cronSchedule = get_option(self::OPTION_CRON_SCHEDULE, '');
+                            ?>
+                            <select name="bs_awo_jobs_cron_schedule" id="bs_awo_jobs_cron_schedule">
+                                <option value="" <?php selected($cronSchedule, ''); ?>><?php echo esc_html__('Aus', 'bs-awo-jobs'); ?></option>
+                                <option value="hourly" <?php selected($cronSchedule, 'hourly'); ?>><?php echo esc_html__('Stündlich', 'bs-awo-jobs'); ?></option>
+                                <option value="twicedaily" <?php selected($cronSchedule, 'twicedaily'); ?>><?php echo esc_html__('Alle 12 Stunden', 'bs-awo-jobs'); ?></option>
+                                <option value="daily" <?php selected($cronSchedule, 'daily'); ?>><?php echo esc_html__('Täglich', 'bs-awo-jobs'); ?></option>
+                            </select>
+                            <p class="description"><?php echo esc_html__('Sync per WP-Cron im Hintergrund (nur wenn „Jetzt synchronisieren“ mindestens einmal ausgeführt wurde).', 'bs-awo-jobs'); ?></p>
+                        </td>
+                    </tr>
                 </table>
                 <?php submit_button(__('Einstellungen speichern', 'bs-awo-jobs')); ?>
             </form>
@@ -176,8 +189,15 @@ class SettingsPage
                             echo ': ' . esc_html($lastRun->error_message);
                         }
                     }
+                    $durationSec = (int) get_option('bs_awo_jobs_last_sync_duration_sec', 0);
+                    if ($durationSec > 0) {
+                        echo ' — <strong>' . esc_html__('Dauer', 'bs-awo-jobs') . ':</strong> ' . esc_html((string) $durationSec) . ' s';
+                    }
                     ?>
                 <?php endif; ?>
+            </p>
+            <p class="description">
+                <strong><?php echo esc_html__('JSON-Quelle', 'bs-awo-jobs'); ?>:</strong> <code><?php echo esc_html($apiUrl); ?></code>
             </p>
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="bs-awo-jobs-sync-form">
@@ -294,9 +314,12 @@ class SettingsPage
             $url = BS_AWO_JOBS_DEFAULT_API_URL;
         }
 
-        // Nur gültige HTTPS-URLs speichern.
+        // Nur gültige HTTPS-URLs speichern (esc_url_raw + wp_http_validate_url).
         $safe_url = esc_url_raw(trim($url), ['https']);
         $url_error = ($url !== '' && ($safe_url === '' || $safe_url !== trim($url)));
+        if (! $url_error && $safe_url !== '' && wp_http_validate_url($safe_url) === false) {
+            $url_error = true;
+        }
         if (! $url_error) {
             $url_to_save = $url === '' ? BS_AWO_JOBS_DEFAULT_API_URL : $safe_url;
             update_option(self::OPTION_API_URL, $url_to_save);
@@ -308,6 +331,15 @@ class SettingsPage
                 $deptSource = 'api';
             }
             update_option(self::OPTION_DEPARTMENT_SOURCE, $deptSource);
+        }
+
+        if (isset($_POST['bs_awo_jobs_cron_schedule'])) {
+            $cronSchedule = sanitize_text_field(wp_unslash($_POST['bs_awo_jobs_cron_schedule']));
+            if (! in_array($cronSchedule, ['', 'hourly', 'twicedaily', 'daily'], true)) {
+                $cronSchedule = '';
+            }
+            update_option(self::OPTION_CRON_SCHEDULE, $cronSchedule);
+            \BsAwoJobs\Wp\Cron::reschedule();
         }
 
         $save_msg = $url_error
@@ -367,20 +399,8 @@ class SettingsPage
 
         check_admin_referer(self::NONCE_RESET);
 
-        global $wpdb;
-        $jobsTable = $wpdb->prefix . 'bsawo_jobs_current';
-        $runsTable = $wpdb->prefix . 'bsawo_runs';
-
-        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $jobsTable)) === $jobsTable) {
-            $wpdb->query("TRUNCATE TABLE `{$jobsTable}`");
-        }
-        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $runsTable)) === $runsTable) {
-            $wpdb->query("TRUNCATE TABLE `{$runsTable}`");
-        }
-
-        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_custom');
-        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_api_id');
-        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_api');
+        RunsRepository::truncate();
+        JobsRepository::truncate();
 
         update_option(self::OPTION_LAST_SYNC_MESSAGE, __('Stellen und Cache wurden geleert. Bitte „Jetzt synchronisieren“ ausführen.', 'bs-awo-jobs'));
 
@@ -392,204 +412,4 @@ class SettingsPage
         );
         exit;
     }
-
-    /**
-     * Speichert einen Run in bsawo_runs.
-     *
-     * @param string|null $dateOverride
-     * @param array       $jobs
-     * @param string      $status
-     * @param string      $errorMessage
-     * @return int Run-ID
-     */
-    public static function store_run($dateOverride, array $jobs, $status, $errorMessage)
-    {
-        global $wpdb;
-
-        $table = $wpdb->prefix . 'bsawo_runs';
-
-        $runDate   = $dateOverride ? $dateOverride : current_time('Y-m-d');
-        $timestamp = current_time('mysql');
-
-        $json      = wp_json_encode($jobs);
-        $checksum  = hash('sha256', (string) $json);
-        $jobsCount = count($jobs);
-
-        $data = [
-            'run_date'          => $runDate,
-            'run_timestamp'     => $timestamp,
-            'snapshot_checksum' => $checksum,
-            'snapshot_json'     => $json,
-            'jobs_count'        => $jobsCount,
-            'status'            => $status,
-            'error_message'     => $errorMessage,
-        ];
-
-        // UNIQUE KEY auf run_date: INSERT … ON DUPLICATE KEY UPDATE aktualisiert die Zeile,
-        // run_id bleibt erhalten → Events der bisherigen Syncs am selben Tag verweisen weiterhin auf gültige Runs (Fluktuationsanalyse).
-        $wpdb->query(
-            $wpdb->prepare(
-                "INSERT INTO `{$table}` (run_date, run_timestamp, snapshot_checksum, snapshot_json, jobs_count, status, error_message)
-                 VALUES (%s, %s, %s, %s, %d, %s, %s)
-                 ON DUPLICATE KEY UPDATE
-                    run_timestamp = VALUES(run_timestamp),
-                    snapshot_checksum = VALUES(snapshot_checksum),
-                    snapshot_json = VALUES(snapshot_json),
-                    jobs_count = VALUES(jobs_count),
-                    status = VALUES(status),
-                    error_message = VALUES(error_message)",
-                $data['run_date'],
-                $data['run_timestamp'],
-                $data['snapshot_checksum'],
-                $data['snapshot_json'],
-                $data['jobs_count'],
-                $data['status'],
-                $data['error_message']
-            )
-        );
-
-        // run_id zuverlässig ermitteln (bei UPDATE liefert insert_id 0)
-        $runId = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE run_date = %s", $runDate));
-
-        return $runId ? (int) $runId : 0;
-    }
-
-    /**
-     * Schreibt die aktuelle Jobliste in bsawo_jobs_current.
-     *
-     * @param int   $runId
-     * @param array $jobs
-     * @return void
-     */
-    public static function store_jobs_current($runId, array $jobs)
-    {
-        global $wpdb;
-
-        \BsAwoJobs\Wp\Activation::ensure_raw_json_column();
-        \BsAwoJobs\Wp\Activation::ensure_einsatzort_columns();
-
-        $table = $wpdb->prefix . 'bsawo_jobs_current';
-
-        // Bestehende Einträge verwerfen – aktuelle Sicht neu aufbauen.
-        $wpdb->query("TRUNCATE TABLE `{$table}`");
-
-        foreach ($jobs as $job) {
-            if (! is_array($job)) {
-                continue;
-            }
-
-            if (empty($job['Stellennummer'])) {
-                // Ohne Stellennummer keine stabile ID → überspringen.
-                continue;
-            }
-
-            $jobId = (string) $job['Stellennummer'];
-
-            $facilityId = Normalizer::generate_facility_id($job);
-
-            $facilityName    = isset($job['Einrichtung']) ? (string) $job['Einrichtung'] : '';
-            // Ansprechpartner-Adresse (Strasse, PLZ, Ort) – laut AWO-Schnittstelle Kontaktadresse.
-            $facilityAddress = '';
-            $street          = isset($job['Strasse']) ? (string) $job['Strasse'] : '';
-            $plz             = isset($job['PLZ']) ? (string) $job['PLZ'] : '';
-            $ort             = isset($job['Ort']) ? (string) $job['Ort'] : '';
-            if ($street || $plz || $ort) {
-                $facilityAddress = trim($street . ', ' . $plz . ' ' . $ort, " ,");
-            }
-
-            // Einsatzort (tatsächlicher Arbeitsort) – laut AWO-Schnittstelle: PLZ_Einsatzort, Einsatzort, Straße/Nr des Einsatzortes.
-            $plzEinsatzort    = isset($job['PLZ_Einsatzort']) ? (string) $job['PLZ_Einsatzort'] : (isset($job['plz_einsatzort']) ? (string) $job['plz_einsatzort'] : '');
-            $einsatzort      = isset($job['Einsatzort']) ? trim((string) $job['Einsatzort']) : (isset($job['einsatzort']) ? trim((string) $job['einsatzort']) : '');
-            $strasseEinsatzort = '';
-            foreach (['Straße/Nr des Einsatzortes', 'Strasse/Nr des Einsatzortes'] as $key) {
-                if (isset($job[$key]) && (string) $job[$key] !== '') {
-                    $strasseEinsatzort = trim((string) $job[$key]);
-                    break;
-                }
-            }
-            if ($strasseEinsatzort === '') {
-                foreach (array_keys($job) as $key) {
-                    if (is_string($key) && (stripos($key, 'Einsatzortes') !== false || stripos($key, 'Nr des') !== false)) {
-                        $strasseEinsatzort = trim((string) $job[$key]);
-                        break;
-                    }
-                }
-            }
-
-            $departmentApi    = isset($job['Fachbereich']) ? (string) $job['Fachbereich'] : '';
-            $departmentApiId  = '';
-            if (isset($job['Fachbereich-IDs']) && is_array($job['Fachbereich-IDs']) && $job['Fachbereich-IDs']) {
-                $keys              = array_keys($job['Fachbereich-IDs']);
-                $departmentApiId   = (string) $keys[0];
-            }
-
-            $departmentCustom = isset($job['Mandantnr/Einrichtungsnr']) ? (string) $job['Mandantnr/Einrichtungsnr'] : '';
-
-            $jobfamilyId   = '';
-            $jobfamilyName = '';
-            if (isset($job['Stellenbezeichnung-IDs']) && is_array($job['Stellenbezeichnung-IDs']) && $job['Stellenbezeichnung-IDs']) {
-                $keys          = array_keys($job['Stellenbezeichnung-IDs']);
-                $firstKey      = (string) $keys[0];
-                $jobfamilyId   = $firstKey;
-                $jobfamilyName = (string) $job['Stellenbezeichnung-IDs'][$firstKey];
-            }
-
-            $contractType   = isset($job['Vertragsart']) ? (string) $job['Vertragsart'] : '';
-            $employmentType = isset($job['Anstellungsart']) ? (string) $job['Anstellungsart'] : '';
-            $workTimeModel  = isset($job['Zeitmodell']) ? (string) $job['Zeitmodell'] : '';
-            $isMinijob      = isset($job['IsMinijob']) ? (int) $job['IsMinijob'] : 0;
-
-            $createdAt   = isset($job['Anlagedatum']) ? (int) $job['Anlagedatum'] : 0;
-            $modifiedAt  = isset($job['Aenderungsdatum']) ? (int) $job['Aenderungsdatum'] : 0;
-            $publishedAt = isset($job['Startdatum']) ? (int) $job['Startdatum'] : 0;
-            $expiresAt   = isset($job['Stopdatum']) ? (int) $job['Stopdatum'] : 0;
-
-            $rawJson = wp_json_encode($job);
-
-            $data = [
-                'job_id'             => $jobId,
-                'facility_id'        => $facilityId,
-                'facility_name'      => $facilityName,
-                'facility_address'   => $facilityAddress,
-                'plz_einsatzort'     => $plzEinsatzort,
-                'strasse_einsatzort' => $strasseEinsatzort,
-                'einsatzort'         => $einsatzort,
-                'department_api'     => $departmentApi,
-                'department_api_id' => $departmentApiId,
-                'department_custom' => $departmentCustom,
-                'jobfamily_id'      => $jobfamilyId,
-                'jobfamily_name'    => $jobfamilyName,
-                'contract_type'     => $contractType,
-                'employment_type'   => $employmentType,
-                'work_time_model'   => $workTimeModel,
-                'is_minijob'        => $isMinijob,
-                'created_at'        => $createdAt,
-                'modified_at'       => $modifiedAt,
-                'published_at'      => $publishedAt,
-                'expires_at'        => $expiresAt,
-                'last_seen_run_id'  => $runId,
-            ];
-
-            $format = [
-                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s',
-                '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d',
-            ];
-
-            $wpdb->insert($table, $data, $format);
-            // raw_json separat per UPDATE schreiben (zuverlässiger als LONGTEXT im INSERT)
-            $wpdb->update(
-                $table,
-                ['raw_json' => $rawJson],
-                ['job_id' => $jobId],
-                ['%s'],
-                ['%s']
-            );
-        }
-
-        // Filter-Optionen-Cache invalidieren (Frontend-Dropdowns).
-        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_custom');
-        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_api_id');
-        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_api');
-    }
-
 }
