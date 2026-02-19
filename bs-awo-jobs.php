@@ -22,13 +22,6 @@ define('BS_AWO_JOBS_TEXTDOMAIN', 'bs-awo-jobs');
 define('BS_AWO_JOBS_MENU_SLUG', 'bs-awo-jobs');
 define('BS_AWO_JOBS_DEFAULT_API_URL', 'https://www.awo-jobs.de/stellenboerse-wesel.json');
 
-// Optionaler Composer-Autoloader (z. B. für PhpSpreadsheet).
-// Wird nur geladen, wenn im Plugin-Verzeichnis ein vendor/autoload.php existiert.
-$bs_awo_jobs_vendor_autoload = BS_AWO_JOBS_PLUGIN_DIR . 'vendor/autoload.php';
-if (is_readable($bs_awo_jobs_vendor_autoload)) {
-    require_once $bs_awo_jobs_vendor_autoload;
-}
-
 /**
  * AJAX-Handler für Frontend-Filter: setzt $_GET aus POST und rendert JobBoard (ohne Reload).
  */
