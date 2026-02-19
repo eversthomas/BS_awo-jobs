@@ -128,5 +128,6 @@ class SyncService
         update_option('bs_awo_jobs_last_sync_duration_sec', $durationSec, false);
         update_option('bs_awo_jobs_last_sync_status', $status, false);
         update_option('bs_awo_jobs_last_sync_error', $errorMessage, false);
+        update_option('bs_awo_jobs_last_sync_at', current_time('mysql'), false);
     }
 }

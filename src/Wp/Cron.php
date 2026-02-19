@@ -36,14 +36,11 @@ class Cron
     }
 
     /**
-     * Stellt den Cron-Zeitplan gemäß Option ein (unschedule + schedule bei Bedarf).
+     * Stellt den Cron-Zeitplan gemäß Option ein (alle geplanten Events löschen, bei Bedarf neu anlegen).
      */
     public static function reschedule()
     {
-        $timestamp = wp_next_scheduled(self::HOOK_SYNC_EVENT);
-        if ($timestamp) {
-            wp_unschedule_event($timestamp, self::HOOK_SYNC_EVENT);
-        }
+        wp_clear_scheduled_hook(self::HOOK_SYNC_EVENT);
 
         $schedule = get_option(SettingsPage::OPTION_CRON_SCHEDULE, '');
         if ($schedule !== '' && in_array($schedule, ['hourly', 'twicedaily', 'daily'], true)) {

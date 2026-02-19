@@ -39,6 +39,19 @@ Das Plugin kann die Stellenanzeigen automatisch über den **WordPress-Cron (WP-C
 - **Wenig Zugriffe:** Wenn die Website nur selten besucht wird, kann WP-Cron seltener laufen. Dann den Sync regelmäßig manuell im Backend ausführen oder einen echten Server-Cron einrichten, der WP-Cron zuverlässig anstößt (z. B. `wp-cron.php` per Cron-Job aufrufen).
 - Im Backend ist jederzeit sichtbar, wann der letzte Sync gelaufen ist und ob er erfolgreich war.
 
+## Troubleshooting
+
+| Problem | Mögliche Ursache | Lösung |
+|--------|------------------|--------|
+| **Sync schlägt fehl: „Fehler beim Abruf der API“** | API der Stellenbörse nicht erreichbar oder down | URL im Backend prüfen (HTTPS), ggf. vom Anbieter prüfen lassen. Temporär: alte Daten bleiben sichtbar. |
+| **Automatischer Sync läuft nicht / nur bei Besuch** | WP-Cron wird nur bei Seitenaufrufen ausgelöst (Low-Traffic) | Sync manuell im Backend ausführen oder einen echten Server-Cron einrichten, der z. B. `https://deine-site.de/wp-cron.php?doing_wp_cron` regelmäßig aufruft. |
+| **„Sync wird bereits ausgeführt …“ obwohl kein Sync läuft** | Lock-Transient hängt (z. B. nach Abbruch oder Crash) | Lock läuft nach 10 Minuten automatisch ab. Sofort-Lösung: Plugin kurz deaktivieren und wieder aktivieren (entfernt den Lock). |
+| **„RENAME TABLE fehlgeschlagen (DB-Rechte?)“** | Datenbank-Benutzer hat keine Rechte für `RENAME TABLE` | Beim Hoster prüfen, ob der DB-User `ALTER`/`RENAME` auf die Tabellen hat. Bis dahin: aktuelle Daten bleiben unverändert; Sync schlägt fehl und meldet den Fehler im Backend. |
+
+## Release-ZIP / Distribution
+
+Für ein sauberes Release-ZIP (ohne `__MACOSX/`, `.DS_Store` usw.) wird `.gitattributes` mit `export-ignore` genutzt. Beim Archivieren mit `git archive` oder beim Export über GitHub Releases werden diese Dateien/Ordner automatisch ausgeschlossen.
+
 ## Deinstallation
 
 Beim **Löschen** des Plugins (nicht nur Deaktivieren) unter Plugins werden alle zugehörigen Optionen, Transients und Datenbanktabellen automatisch entfernt.

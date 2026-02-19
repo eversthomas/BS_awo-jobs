@@ -21,6 +21,7 @@ $options = [
     'bs_awo_jobs_last_sync_duration_sec',
     'bs_awo_jobs_last_sync_status',
     'bs_awo_jobs_last_sync_error',
+    'bs_awo_jobs_last_sync_at',
     'bs_awo_jobs_sync_rename_failed',
     'bs_awo_jobs_frontend_design',
     'bs_awo_jobs_frontend_display',

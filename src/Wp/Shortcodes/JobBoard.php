@@ -111,6 +111,10 @@ class JobBoard
 
         $table = $wpdb->prefix . 'bsawo_jobs_current';
 
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+            return self::render_unavailable_message();
+        }
+
         $ort         = $atts['ort'] !== '' ? $atts['ort'] : (isset($_GET['ort']) ? sanitize_text_field(wp_unslash($_GET['ort'])) : '');
         $fachbereich = $atts['fachbereich'] !== '' ? $atts['fachbereich'] : (isset($_GET['fachbereich']) ? sanitize_text_field(wp_unslash($_GET['fachbereich'])) : '');
         $jobfamily   = $atts['jobfamily'] !== '' ? $atts['jobfamily'] : (isset($_GET['jobfamily']) ? sanitize_text_field(wp_unslash($_GET['jobfamily'])) : '');
@@ -469,6 +473,23 @@ class JobBoard
     }
 
     /**
+     * Meldung, wenn die Stellen-Tabelle (noch) nicht existiert (Graceful Degradation).
+     *
+     * @return string
+     */
+    private static function render_unavailable_message()
+    {
+        self::enqueue_assets();
+        ob_start();
+        ?>
+        <div class="bs-awo-jobs">
+            <p class="bs-awo-jobs-empty"><?php echo esc_html__('Stellenangebote werden derzeit aktualisiert. Bitte später erneut vorbeischauen.', 'bs-awo-jobs'); ?></p>
+        </div>
+        <?php
+        return ob_get_clean();
+    }
+
+    /**
      * Detail-URL bauen.
      *
      * @param string $job_id
@@ -545,6 +566,10 @@ class JobBoard
         global $wpdb;
 
         $table = $wpdb->prefix . 'bsawo_jobs_current';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+            return self::render_unavailable_message();
+        }
+
         $row   = $wpdb->get_row(
             $wpdb->prepare("SELECT * FROM `{$table}` WHERE job_id = %s", $job_id),
             OBJECT

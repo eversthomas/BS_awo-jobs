@@ -24,12 +24,16 @@ class SettingsPage
      *
      * @return void
      */
+    /** Anzahl Tage ohne erfolgreichen Sync, ab der eine „Daten veraltet“-Hinweis erscheint. */
+    const STALE_DAYS_THRESHOLD = 7;
+
     public static function init()
     {
         add_action('admin_menu', [self::class, 'register_menu']);
         add_action('admin_post_bs_awo_jobs_save_settings', [self::class, 'handle_save_settings']);
         add_action('admin_post_bs_awo_jobs_sync_now', [self::class, 'handle_sync_now']);
         add_action('admin_post_bs_awo_jobs_reset_data', [self::class, 'handle_reset_data']);
+        add_action('admin_notices', [self::class, 'maybe_show_stale_data_notice']);
     }
 
     /**
@@ -414,5 +418,48 @@ class SettingsPage
             )
         );
         exit;
+    }
+
+    /**
+     * Zeigt eine Admin-Notice, wenn der letzte erfolgreiche Sync älter als STALE_DAYS_THRESHOLD ist.
+     */
+    public static function maybe_show_stale_data_notice()
+    {
+        if (! current_user_can('manage_options')) {
+            return;
+        }
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if ($screen && $screen->id !== 'toplevel_page_' . BS_AWO_JOBS_MENU_SLUG) {
+            return;
+        }
+
+        global $wpdb;
+        $runsTable = $wpdb->prefix . 'bsawo_runs';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $runsTable)) !== $runsTable) {
+            return;
+        }
+
+        $lastSuccess = $wpdb->get_var(
+            "SELECT run_timestamp FROM `{$runsTable}` WHERE status = 'success' ORDER BY run_timestamp DESC LIMIT 1"
+        );
+        if ($lastSuccess === null) {
+            return;
+        }
+
+        $threshold = (int) self::STALE_DAYS_THRESHOLD;
+        $cutoff    = strtotime("-{$threshold} days");
+        if (strtotime($lastSuccess) >= $cutoff) {
+            return;
+        }
+
+        $date = date_i18n(get_option('date_format'), strtotime($lastSuccess));
+        echo '<div class="notice notice-warning is-dismissible"><p>';
+        echo esc_html(sprintf(
+            /* translators: 1: number of days, 2: date of last successful sync */
+            __('Die Stellen-Daten sind möglicherweise veraltet (letzter erfolgreicher Sync: vor mehr als %1$d Tagen, am %2$s). Bitte „Jetzt synchronisieren“ ausführen oder den automatischen Sync prüfen.', 'bs-awo-jobs'),
+            $threshold,
+            $date
+        ));
+        echo '</p></div>';
     }
 }

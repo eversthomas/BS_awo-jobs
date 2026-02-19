@@ -1,9 +1,13 @@
 <?php
 /**
  * Plugin Name:       BS AWO Jobs
+ * Plugin URI:        https://github.com/your-repo/BS_awo-jobs
  * Description:       AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode mit konfigurierbarem Design.
  * Version:           2.0
  * Author:            Tom Evers
+ * Requires at least: 5.9
+ * Requires PHP:      7.4
+ * Tested up to:      6.4
  * Text Domain:       bs-awo-jobs
  * Domain Path:       /languages
  */
@@ -78,6 +82,10 @@ register_activation_hook(
         if (class_exists('\BsAwoJobs\Wp\Activation')) {
             \BsAwoJobs\Wp\Activation::activate();
         }
+        // Cron-Default: bei erster Aktivierung automatisch 2× täglich (alle 12 Stunden).
+        if (get_option('bs_awo_jobs_cron_schedule', '') === '') {
+            update_option('bs_awo_jobs_cron_schedule', 'twicedaily');
+        }
         if (class_exists('\BsAwoJobs\Wp\Cron')) {
             \BsAwoJobs\Wp\Cron::reschedule();
         }
@@ -95,6 +103,7 @@ register_deactivation_hook(
         delete_option('bs_awo_jobs_last_sync_status');
         delete_option('bs_awo_jobs_last_sync_error');
         delete_option('bs_awo_jobs_sync_rename_failed');
+        delete_option('bs_awo_jobs_last_sync_at');
     }
 );
 
