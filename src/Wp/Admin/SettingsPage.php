@@ -16,6 +16,7 @@ class SettingsPage
     const OPTION_LAST_SYNC_MESSAGE = 'bs_awo_jobs_last_sync_message';
     const NONCE_SAVE_SETTINGS      = 'bs_awo_jobs_save_settings';
     const NONCE_SYNC_NOW           = 'bs_awo_jobs_sync_now';
+    const NONCE_RESET              = 'bs_awo_jobs_reset_data';
 
     /**
      * Bootstrap.
@@ -27,6 +28,7 @@ class SettingsPage
         add_action('admin_menu', [self::class, 'register_menu']);
         add_action('admin_post_bs_awo_jobs_save_settings', [self::class, 'handle_save_settings']);
         add_action('admin_post_bs_awo_jobs_sync_now', [self::class, 'handle_sync_now']);
+        add_action('admin_post_bs_awo_jobs_reset_data', [self::class, 'handle_reset_data']);
     }
 
     /**
@@ -58,6 +60,8 @@ class SettingsPage
             wp_die(esc_html__('Du hast keine Berechtigung, diese Seite zu sehen.', 'bs-awo-jobs'));
         }
 
+        \BsAwoJobs\Wp\Activation::ensure_einsatzort_columns();
+
         $apiUrl           = get_option(self::OPTION_API_URL, BS_AWO_JOBS_DEFAULT_API_URL);
         $departmentSource = get_option(self::OPTION_DEPARTMENT_SOURCE, 'api');
         $lastMsg          = get_option(self::OPTION_LAST_SYNC_MESSAGE, '');
@@ -67,6 +71,11 @@ class SettingsPage
         $runsTable  = $wpdb->prefix . 'bsawo_runs';
         $tableExists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $jobsTable)) === $jobsTable;
         $runsExists  = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $runsTable)) === $runsTable;
+
+        $hasEinsatzortCol = false;
+        if ($tableExists) {
+            $hasEinsatzortCol = ! empty($wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM `{$jobsTable}` LIKE %s", 'einsatzort')));
+        }
 
         $activeJobs = 0;
         $lastRun    = null;
@@ -86,16 +95,29 @@ class SettingsPage
         $totalJobs = 0;
         if ($tableExists) {
             $totalJobs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$jobsTable}");
-            $jobs = $wpdb->get_results(
-                $wpdb->prepare(
-                    "SELECT job_id, facility_name, facility_address, jobfamily_name, department_api, department_custom, contract_type, raw_json
-                     FROM {$jobsTable}
-                     ORDER BY facility_name ASC, jobfamily_name ASC
-                     LIMIT %d OFFSET %d",
-                    $perPage,
-                    $offset
-                )
-            );
+            if ($hasEinsatzortCol) {
+                $jobs = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT job_id, facility_name, facility_address, COALESCE(einsatzort,'') AS einsatzort, jobfamily_name, department_api, department_custom, contract_type, raw_json
+                         FROM {$jobsTable}
+                         ORDER BY facility_name ASC, jobfamily_name ASC
+                         LIMIT %d OFFSET %d",
+                        $perPage,
+                        $offset
+                    )
+                );
+            } else {
+                $jobs = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT job_id, facility_name, facility_address, jobfamily_name, department_api, department_custom, contract_type, raw_json
+                         FROM {$jobsTable}
+                         ORDER BY facility_name ASC, jobfamily_name ASC
+                         LIMIT %d OFFSET %d",
+                        $perPage,
+                        $offset
+                    )
+                );
+            }
         }
         $totalPages = $totalJobs > 0 ? (int) ceil($totalJobs / $perPage) : 1;
 
@@ -111,7 +133,7 @@ class SettingsPage
 
             <h2><?php echo esc_html__('API & Sync', 'bs-awo-jobs'); ?></h2>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field(self::NONCE_SAVE_SETTINGS); ?>
+                <?php wp_nonce_field(self::NONCE_SAVE_SETTINGS, '_wpnonce', true, true); ?>
                 <input type="hidden" name="action" value="bs_awo_jobs_save_settings" />
                 <table class="form-table" role="presentation">
                     <tr>
@@ -136,6 +158,9 @@ class SettingsPage
                 <?php submit_button(__('Einstellungen speichern', 'bs-awo-jobs')); ?>
             </form>
 
+            <?php if ($totalJobs === 0) : ?>
+                <p class="description"><?php echo esc_html__('Nach dem ersten Sync erscheinen hier die Stellen.', 'bs-awo-jobs'); ?></p>
+            <?php endif; ?>
             <p>
                 <strong><?php echo esc_html__('Aktive Stellen', 'bs-awo-jobs'); ?>:</strong> <?php echo esc_html(number_format_i18n($activeJobs)); ?>
                 <?php if ($lastRun) : ?>
@@ -156,9 +181,16 @@ class SettingsPage
             </p>
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="bs-awo-jobs-sync-form">
-                <?php wp_nonce_field(self::NONCE_SYNC_NOW); ?>
+                <?php wp_nonce_field(self::NONCE_SYNC_NOW, '_wpnonce', true, true); ?>
                 <input type="hidden" name="action" value="bs_awo_jobs_sync_now" />
+                <p id="bs-awo-jobs-sync-hint" class="description" style="display:none; margin-bottom: 8px;" aria-live="polite"><?php echo esc_html__('Sync läuft… Bitte nicht schließen.', 'bs-awo-jobs'); ?></p>
                 <?php submit_button(__('Jetzt synchronisieren', 'bs-awo-jobs'), 'primary', 'submit', false); ?>
+            </form>
+            <p class="description" style="margin-top: 12px;"><?php echo esc_html__('Mit „Stellen und Cache leeren“ werden alle gespeicherten Stellen und der Filter-Cache gelöscht. Anschließend „Jetzt synchronisieren“ ausführen für einen sauberen Neustart.', 'bs-awo-jobs'); ?></p>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="bs-awo-jobs-reset-form" style="margin-top: 8px;">
+                <?php wp_nonce_field(self::NONCE_RESET, '_wpnonce', true, true); ?>
+                <input type="hidden" name="action" value="bs_awo_jobs_reset_data" />
+                <?php submit_button(__('Stellen und Cache leeren', 'bs-awo-jobs'), 'secondary', 'submit', false); ?>
             </form>
             <script>
             (function(){
@@ -166,7 +198,9 @@ class SettingsPage
                 if (!form) return;
                 form.addEventListener('submit', function(){
                     var btn = form.querySelector('input[type="submit"], button[type="submit"]');
+                    var hint = document.getElementById('bs-awo-jobs-sync-hint');
                     if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+                    if (hint) { hint.style.display = 'block'; }
                 });
             })();
             </script>
@@ -183,7 +217,8 @@ class SettingsPage
                             <th><?php echo esc_html__('Job-ID', 'bs-awo-jobs'); ?></th>
                             <th><?php echo esc_html__('Stellenbezeichnung', 'bs-awo-jobs'); ?></th>
                             <th><?php echo esc_html__('Einrichtung', 'bs-awo-jobs'); ?></th>
-                            <th><?php echo esc_html__('Ort', 'bs-awo-jobs'); ?></th>
+                            <th><?php echo esc_html__('Ort (Ansprechpartner)', 'bs-awo-jobs'); ?></th>
+                            <?php if ($hasEinsatzortCol) : ?><th><?php echo esc_html__('Einsatzort', 'bs-awo-jobs'); ?></th><?php endif; ?>
                             <th><?php echo esc_html__('Fachbereich', 'bs-awo-jobs'); ?></th>
                             <th><?php echo esc_html__('Vertragsart', 'bs-awo-jobs'); ?></th>
                         </tr>
@@ -208,6 +243,7 @@ class SettingsPage
                                 <td><?php echo esc_html($title); ?></td>
                                 <td><?php echo esc_html($row->facility_name ?: '—'); ?></td>
                                 <td><?php echo esc_html($row->facility_address ?: '—'); ?></td>
+                                <?php if ($hasEinsatzortCol) : ?><td><?php echo esc_html(! empty($row->einsatzort) ? $row->einsatzort : '—'); ?></td><?php endif; ?>
                                 <td><?php echo esc_html($dept ?: '—'); ?></td>
                                 <td><?php echo esc_html($row->contract_type ?: '—'); ?></td>
                             </tr>
@@ -319,6 +355,45 @@ class SettingsPage
     }
 
     /**
+     * Leert Stellen-Tabelle und Filter-Cache für einen sauberen Neustart.
+     *
+     * @return void
+     */
+    public static function handle_reset_data()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Keine Berechtigung.', 'bs-awo-jobs'));
+        }
+
+        check_admin_referer(self::NONCE_RESET);
+
+        global $wpdb;
+        $jobsTable = $wpdb->prefix . 'bsawo_jobs_current';
+        $runsTable = $wpdb->prefix . 'bsawo_runs';
+
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $jobsTable)) === $jobsTable) {
+            $wpdb->query("TRUNCATE TABLE `{$jobsTable}`");
+        }
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $runsTable)) === $runsTable) {
+            $wpdb->query("TRUNCATE TABLE `{$runsTable}`");
+        }
+
+        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_custom');
+        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_api_id');
+        delete_transient(\BsAwoJobs\Wp\Shortcodes\JobBoard::TRANSIENT_FILTER_OPTS_PREFIX . 'department_api');
+
+        update_option(self::OPTION_LAST_SYNC_MESSAGE, __('Stellen und Cache wurden geleert. Bitte „Jetzt synchronisieren“ ausführen.', 'bs-awo-jobs'));
+
+        wp_safe_redirect(
+            add_query_arg(
+                ['page' => BS_AWO_JOBS_MENU_SLUG],
+                admin_url('admin.php')
+            )
+        );
+        exit;
+    }
+
+    /**
      * Speichert einen Run in bsawo_runs.
      *
      * @param string|null $dateOverride
@@ -391,6 +466,7 @@ class SettingsPage
         global $wpdb;
 
         \BsAwoJobs\Wp\Activation::ensure_raw_json_column();
+        \BsAwoJobs\Wp\Activation::ensure_einsatzort_columns();
 
         $table = $wpdb->prefix . 'bsawo_jobs_current';
 
@@ -412,12 +488,32 @@ class SettingsPage
             $facilityId = Normalizer::generate_facility_id($job);
 
             $facilityName    = isset($job['Einrichtung']) ? (string) $job['Einrichtung'] : '';
+            // Ansprechpartner-Adresse (Strasse, PLZ, Ort) – laut AWO-Schnittstelle Kontaktadresse.
             $facilityAddress = '';
             $street          = isset($job['Strasse']) ? (string) $job['Strasse'] : '';
             $plz             = isset($job['PLZ']) ? (string) $job['PLZ'] : '';
             $ort             = isset($job['Ort']) ? (string) $job['Ort'] : '';
             if ($street || $plz || $ort) {
                 $facilityAddress = trim($street . ', ' . $plz . ' ' . $ort, " ,");
+            }
+
+            // Einsatzort (tatsächlicher Arbeitsort) – laut AWO-Schnittstelle: PLZ_Einsatzort, Einsatzort, Straße/Nr des Einsatzortes.
+            $plzEinsatzort    = isset($job['PLZ_Einsatzort']) ? (string) $job['PLZ_Einsatzort'] : (isset($job['plz_einsatzort']) ? (string) $job['plz_einsatzort'] : '');
+            $einsatzort      = isset($job['Einsatzort']) ? trim((string) $job['Einsatzort']) : (isset($job['einsatzort']) ? trim((string) $job['einsatzort']) : '');
+            $strasseEinsatzort = '';
+            foreach (['Straße/Nr des Einsatzortes', 'Strasse/Nr des Einsatzortes'] as $key) {
+                if (isset($job[$key]) && (string) $job[$key] !== '') {
+                    $strasseEinsatzort = trim((string) $job[$key]);
+                    break;
+                }
+            }
+            if ($strasseEinsatzort === '') {
+                foreach (array_keys($job) as $key) {
+                    if (is_string($key) && (stripos($key, 'Einsatzortes') !== false || stripos($key, 'Nr des') !== false)) {
+                        $strasseEinsatzort = trim((string) $job[$key]);
+                        break;
+                    }
+                }
             }
 
             $departmentApi    = isset($job['Fachbereich']) ? (string) $job['Fachbereich'] : '';
@@ -451,11 +547,14 @@ class SettingsPage
             $rawJson = wp_json_encode($job);
 
             $data = [
-                'job_id'            => $jobId,
-                'facility_id'       => $facilityId,
-                'facility_name'     => $facilityName,
-                'facility_address'  => $facilityAddress,
-                'department_api'    => $departmentApi,
+                'job_id'             => $jobId,
+                'facility_id'        => $facilityId,
+                'facility_name'      => $facilityName,
+                'facility_address'   => $facilityAddress,
+                'plz_einsatzort'     => $plzEinsatzort,
+                'strasse_einsatzort' => $strasseEinsatzort,
+                'einsatzort'         => $einsatzort,
+                'department_api'     => $departmentApi,
                 'department_api_id' => $departmentApiId,
                 'department_custom' => $departmentCustom,
                 'jobfamily_id'      => $jobfamilyId,
@@ -472,7 +571,7 @@ class SettingsPage
             ];
 
             $format = [
-                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s',
+                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s',
                 '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d',
             ];
 

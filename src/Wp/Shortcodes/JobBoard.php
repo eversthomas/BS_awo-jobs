@@ -92,7 +92,7 @@ class JobBoard
             [
                 'ajaxUrl'  => admin_url('admin-ajax.php'),
                 'nonce'    => wp_create_nonce('bs_awo_jobs_filter'),
-                'i18nError' => __('Filter konnte nicht geladen werden. Bitte Seite neu laden.', 'bs-awo-jobs'),
+                'i18nError' => __('Filter konnten nicht geladen werden. Seite wird neu geladen.', 'bs-awo-jobs'),
             ]
         );
     }
@@ -145,8 +145,9 @@ class JobBoard
         $prepare_args = [];
 
         if ($ort !== '') {
-            // Nach Stadtname in der Adresse filtern (z. B. \"46483 Wesel\").
-            $where[]        = ' facility_address LIKE %s ';
+            // Einsatzort (tatsächlicher Arbeitsort) und Ansprechpartner-Adresse (facility_address).
+            $where[]        = ' ( COALESCE(einsatzort,\'\') LIKE %s OR facility_address LIKE %s ) ';
+            $prepare_args[] = '%' . $wpdb->esc_like($ort) . '%';
             $prepare_args[] = '%' . $wpdb->esc_like($ort) . '%';
         }
         if ($fachbereich !== '') {
@@ -171,11 +172,11 @@ class JobBoard
                 : "SELECT COUNT(*) FROM `{$table}` WHERE {$where_sql}"
         );
 
-        // ✅ raw_json wird benötigt (Bild / Stellenbezeichnung etc.)
+        // raw_json wird benötigt (Bild / Stellenbezeichnung etc.); einsatzort für Anzeige/Filter.
         $select_args = array_merge($filter_args, [$limit, $offset]);
         $jobs = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT job_id, facility_name, facility_address, jobfamily_name, contract_type, employment_type,
+                "SELECT job_id, facility_name, facility_address, COALESCE(einsatzort,'') AS einsatzort, jobfamily_name, contract_type, employment_type,
                         department_api, department_custom, {$deptCol} AS dept_val, raw_json
                  FROM `{$table}`
                  WHERE {$where_sql}
@@ -214,7 +215,7 @@ class JobBoard
             <h2 class="bs-awo-jobs-title"><?php echo esc_html__('Stellenangebote', 'bs-awo-jobs'); ?></h2>
 
             <?php if (!$hide_filters): ?>
-			<form method="get" class="bs-awo-jobs-filters" action="<?php echo esc_url($base_url); ?>">
+			<form method="get" class="bs-awo-jobs-filters" action="<?php echo esc_url($base_url); ?>" aria-label="<?php echo esc_attr__('Filter für Stellenangebote', 'bs-awo-jobs'); ?>">
                 <div class="bs-awo-jobs-filter-row">
                     <label for="bs-awo-jobs-ort"><?php echo esc_html__('Ort / Standort', 'bs-awo-jobs'); ?></label>
                     <select id="bs-awo-jobs-ort" name="ort">
@@ -777,14 +778,14 @@ class JobBoard
 
         $hasOrtFilter = ! empty($currentFilter['ort']);
         $ortValue     = $hasOrtFilter ? (string) $currentFilter['ort'] : '';
+        $whereOrt     = $hasOrtFilter
+            ? $wpdb->prepare(' AND ( COALESCE(einsatzort,\'\') LIKE %s OR facility_address LIKE %s ) ', '%' . $wpdb->esc_like($ortValue) . '%', '%' . $wpdb->esc_like($ortValue) . '%')
+            : '';
 
         if (! $hasOrtFilter && $cached !== false && is_array($cached) && isset($cached['ort'])) {
             $result = $cached;
         } else {
             $fachbereich = [];
-            $whereOrt = $hasOrtFilter
-                ? $wpdb->prepare(' AND facility_address LIKE %s', '%' . $wpdb->esc_like($ortValue) . '%')
-                : '';
             if ($deptCol === 'department_api_id') {
                 $rows = $wpdb->get_results(
                     "SELECT department_api_id AS val, department_api AS label FROM `{$table}` WHERE department_api_id IS NOT NULL AND department_api_id <> ''{$whereOrt} GROUP BY department_api_id, department_api ORDER BY department_api",
@@ -808,11 +809,8 @@ class JobBoard
             }
 
             $jobfamily = [];
-            $whereOrtJF = $hasOrtFilter
-                ? $wpdb->prepare(' AND facility_address LIKE %s', '%' . $wpdb->esc_like($ortValue) . '%')
-                : '';
             $rows = $wpdb->get_results(
-                "SELECT jobfamily_id AS val, jobfamily_name AS label FROM `{$table}` WHERE jobfamily_id IS NOT NULL AND jobfamily_id <> ''{$whereOrtJF} GROUP BY jobfamily_id, jobfamily_name ORDER BY jobfamily_name",
+                "SELECT jobfamily_id AS val, jobfamily_name AS label FROM `{$table}` WHERE jobfamily_id IS NOT NULL AND jobfamily_id <> ''{$whereOrt} GROUP BY jobfamily_id, jobfamily_name ORDER BY jobfamily_name",
                 OBJECT_K
             );
             if (is_array($rows)) {
@@ -822,11 +820,8 @@ class JobBoard
             }
 
             $vertragsart = [];
-            $whereOrtVT = $hasOrtFilter
-                ? $wpdb->prepare(' AND facility_address LIKE %s', '%' . $wpdb->esc_like($ortValue) . '%')
-                : '';
             $rows = $wpdb->get_results(
-                "SELECT contract_type AS val FROM `{$table}` WHERE contract_type IS NOT NULL AND contract_type <> ''{$whereOrtVT} GROUP BY contract_type ORDER BY contract_type",
+                "SELECT contract_type AS val FROM `{$table}` WHERE contract_type IS NOT NULL AND contract_type <> ''{$whereOrt} GROUP BY contract_type ORDER BY contract_type",
                 OBJECT_K
             );
             if (is_array($rows)) {
@@ -835,27 +830,43 @@ class JobBoard
                 }
             }
 
-            // Orte / Standorte (basieren auf facility_address) – nur Städte extrahieren.
+            // Orte: aus Einsatzort und facility_address – alle Zeilen durchgehen (OBJECT, nicht OBJECT_K, sonst gehen Orte verloren).
             $orte = [];
-            $rows = $wpdb->get_results(
-                "SELECT facility_address AS val FROM `{$table}` WHERE facility_address IS NOT NULL AND facility_address <> '' GROUP BY facility_address ORDER BY facility_address",
-                OBJECT_K
-            );
+            $hasEinsatzortCol = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", 'einsatzort'));
+            if (! empty($hasEinsatzortCol)) {
+                $rows = $wpdb->get_results(
+                    "SELECT facility_address, einsatzort FROM `{$table}` WHERE (facility_address IS NOT NULL AND facility_address <> '') OR (einsatzort IS NOT NULL AND einsatzort <> '')",
+                    OBJECT
+                );
+            } else {
+                $rows = $wpdb->get_results(
+                    "SELECT facility_address AS val FROM `{$table}` WHERE facility_address IS NOT NULL AND facility_address <> ''",
+                    OBJECT
+                );
+            }
             if (is_array($rows)) {
                 foreach ($rows as $r) {
-                    $rawAddr = (string) $r->val;
-                    $city    = $rawAddr;
-
-                    // Typisches Muster: \"Straße 1, 12345 Stadt\" oder \"12345 Stadt\".
-                    if (preg_match('/\\b\\d{5}\\s+(.+)$/', $rawAddr, $m)) {
-                        $city = trim($m[1]);
+                    $rawAddr = isset($r->facility_address) ? (string) $r->facility_address : (isset($r->val) ? (string) $r->val : '');
+                    if ($rawAddr !== '') {
+                        $city = $rawAddr;
+                        if (preg_match('/\b\d{5}\s+(.+)$/u', $rawAddr, $m)) {
+                            $city = trim($m[1]);
+                        }
+                        if ($city !== '') {
+                            $orte[$city] = $city;
+                        }
                     }
-
-                    if ($city !== '') {
-                        $orte[$city] = $city;
+                    $einsatzortStr = isset($r->einsatzort) ? trim((string) $r->einsatzort) : '';
+                    if ($einsatzortStr !== '') {
+                        foreach (array_map('trim', explode(',', $einsatzortStr)) as $part) {
+                            if ($part !== '') {
+                                $orte[$part] = $part;
+                            }
+                        }
                     }
                 }
             }
+            ksort($orte, SORT_LOCALE_STRING);
 
             $result = [
                 'fachbereich' => $fachbereich,
@@ -889,12 +900,8 @@ class JobBoard
                 );
             }
 
-            $whereOrtDept = $hasOrtFilter
-                ? $wpdb->prepare(' AND facility_address LIKE %s', '%' . $wpdb->esc_like($ortValue) . '%')
-                : '';
-
             $rows = $wpdb->get_results(
-                "SELECT jobfamily_id AS val, jobfamily_name AS label FROM `{$table}` {$whereDept}{$whereOrtDept} GROUP BY jobfamily_id, jobfamily_name ORDER BY jobfamily_name",
+                "SELECT jobfamily_id AS val, jobfamily_name AS label FROM `{$table}` {$whereDept}{$whereOrt} GROUP BY jobfamily_id, jobfamily_name ORDER BY jobfamily_name",
                 OBJECT_K
             );
 

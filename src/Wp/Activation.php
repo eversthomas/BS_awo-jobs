@@ -12,6 +12,8 @@ class Activation
 {
     /**
      * Führt Aktivierungslogik aus (Tabellen bsawo_runs, bsawo_jobs_current anlegen).
+     * Bei Multisite-Netzwerkaktivierung wird diese Methode pro Blog aufgerufen;
+     * Tabellen werden mit dem jeweiligen $wpdb->prefix angelegt.
      *
      * @return void
      */
@@ -49,6 +51,9 @@ class Activation
             facility_id CHAR(16) NOT NULL,
             facility_name VARCHAR(255),
             facility_address TEXT,
+            plz_einsatzort VARCHAR(20),
+            strasse_einsatzort VARCHAR(255),
+            einsatzort TEXT,
             department_api VARCHAR(100),
             department_api_id VARCHAR(10),
             department_custom VARCHAR(100),
@@ -67,13 +72,14 @@ class Activation
             INDEX idx_facility (facility_id),
             INDEX idx_dept_api (department_api_id),
             INDEX idx_dept_custom (department_custom),
-            INDEX idx_jobfamily (jobfamily_id)
+            INDEX idx_jobfamily (jobfamily_id),
+            INDEX idx_einsatzort (einsatzort(100))
         ) {$charset_collate};";
 
         dbDelta($sql_runs);
         dbDelta($sql_jobs_current);
 
-        update_option('bs_awo_jobs_db_version', 2);
+        update_option('bs_awo_jobs_db_version', 3);
     }
 
     /**
@@ -92,9 +98,13 @@ class Activation
         $version = (int) get_option('bs_awo_jobs_db_version', 1);
 
         self::ensure_raw_json_column();
+        self::ensure_einsatzort_columns();
 
         if ($version < 2) {
             update_option('bs_awo_jobs_db_version', 2);
+        }
+        if ($version < 3) {
+            update_option('bs_awo_jobs_db_version', 3);
         }
     }
 
@@ -122,5 +132,36 @@ class Activation
         }
 
         $wpdb->query("ALTER TABLE `{$table}` ADD COLUMN raw_json LONGTEXT");
+    }
+
+    /**
+     * Stellt sicher, dass die Tabelle bsawo_jobs_current die Einsatzort-Spalten hat
+     * (laut AWO-Schnittstelle: PLZ_Einsatzort, Einsatzort, Straße/Nr des Einsatzortes).
+     *
+     * @return void
+     */
+    public static function ensure_einsatzort_columns()
+    {
+        global $wpdb;
+
+        if (! ($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'bsawo_jobs_current';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+            return;
+        }
+
+        $add = [];
+        foreach (['plz_einsatzort' => 'VARCHAR(20)', 'strasse_einsatzort' => 'VARCHAR(255)', 'einsatzort' => 'TEXT'] as $col => $def) {
+            $cols = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", $col));
+            if (empty($cols)) {
+                $add[] = "ADD COLUMN `{$col}` {$def}";
+            }
+        }
+        if ($add) {
+            $wpdb->query("ALTER TABLE `{$table}` " . implode(', ', $add));
+        }
     }
 }

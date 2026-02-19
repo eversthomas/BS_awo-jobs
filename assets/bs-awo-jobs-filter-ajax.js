@@ -103,6 +103,16 @@
                     if (spinner && spinner.parentNode) {
                         spinner.parentNode.removeChild(spinner);
                     }
+                    var msg = (typeof bsAwoJobsFilter !== 'undefined' && bsAwoJobsFilter.i18nError) ? bsAwoJobsFilter.i18nError : 'Filter konnten nicht geladen werden. Seite wird neu geladen.';
+                    var notice = document.createElement('p');
+                    notice.className = 'bs-awo-jobs-ajax-error';
+                    notice.setAttribute('role', 'alert');
+                    notice.textContent = msg;
+                    notice.style.marginTop = '8px';
+                    notice.style.color = '#b32d2e';
+                    if (container && !container.querySelector('.bs-awo-jobs-ajax-error')) {
+                        container.insertBefore(notice, container.firstChild);
+                    }
                     var fallbackParams = new URLSearchParams();
                     var inputsFallback = form.querySelectorAll('input, select');
                     for (var k = 0; k < inputsFallback.length; k++) {
@@ -113,7 +123,7 @@
                     }
                     var fallbackUrl = (form.action || (window.location.origin + window.location.pathname)).split('#')[0];
                     fallbackUrl += (fallbackParams.toString() ? '?' + fallbackParams.toString() : '') + '#bs-awo-jobs';
-                    window.location = fallbackUrl;
+                    setTimeout(function () { window.location = fallbackUrl; }, 2500);
                 })
                 .then(function () {
                     container.classList.remove('bs-awo-jobs--loading');

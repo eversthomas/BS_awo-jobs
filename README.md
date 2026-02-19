@@ -20,6 +20,8 @@ WordPress-Plugin zur Anzeige der AWO-Stellenbörse: JSON-API synchronisieren und
 2. Unter **Plugins → Installierte Plugins** das Plugin **„BS AWO Jobs“** aktivieren.
 3. Bei Aktivierung werden die Tabellen `{prefix}bsawo_runs` und `{prefix}bsawo_jobs_current` angelegt.
 
+**Multisite:** Bei Netzwerkaktivierung wird die Aktivierung pro Blog ausgeführt; jede Site erhält ihre eigenen Tabellen mit dem jeweiligen Tabellenpräfix.
+
 ## Nutzung
 
 1. **AWO Jobs** (Hauptmenü): JSON-API-URL eintragen (z. B. `https://www.awo-jobs.de/stellenboerse-wesel.json`), Einstellungen speichern, dann **„Jetzt synchronisieren“** ausführen. Die Tabelle darunter zeigt alle aktuellen Stellen.

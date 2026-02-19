@@ -45,19 +45,27 @@ class FrontendSettingsPage
         }
 
         if (! current_user_can('manage_options')) {
-            wp_die(__('Keine Berechtigung.', 'bs-awo-jobs'));
+            wp_die(esc_html__('Keine Berechtigung.', 'bs-awo-jobs'));
         }
 
         check_admin_referer(self::NONCE_ACTION, 'bs_awo_jobs_frontend_nonce');
 
         // Design-Optionen
+        $design_defaults_hex = [
+            'card_bg_color'     => '#ffffff',
+            'card_text_color'   => '#333333',
+            'card_link_color'   => '#0073aa',
+            'card_border_color' => '#dddddd',
+            'button_bg_color'   => '#0073aa',
+            'button_text_color' => '#ffffff',
+        ];
         $design_options = [
-            'card_bg_color'      => sanitize_hex_color($_POST['card_bg_color'] ?? '#ffffff'),
-            'card_text_color'    => sanitize_hex_color($_POST['card_text_color'] ?? '#333333'),
-            'card_link_color'    => sanitize_hex_color($_POST['card_link_color'] ?? '#0073aa'),
-            'card_border_color'  => sanitize_hex_color($_POST['card_border_color'] ?? '#dddddd'),
-            'button_bg_color'    => sanitize_hex_color($_POST['button_bg_color'] ?? '#0073aa'),
-            'button_text_color'  => sanitize_hex_color($_POST['button_text_color'] ?? '#ffffff'),
+            'card_bg_color'      => sanitize_hex_color($_POST['card_bg_color'] ?? '#ffffff') ?: $design_defaults_hex['card_bg_color'],
+            'card_text_color'    => sanitize_hex_color($_POST['card_text_color'] ?? '#333333') ?: $design_defaults_hex['card_text_color'],
+            'card_link_color'    => sanitize_hex_color($_POST['card_link_color'] ?? '#0073aa') ?: $design_defaults_hex['card_link_color'],
+            'card_border_color'  => sanitize_hex_color($_POST['card_border_color'] ?? '#dddddd') ?: $design_defaults_hex['card_border_color'],
+            'button_bg_color'    => sanitize_hex_color($_POST['button_bg_color'] ?? '#0073aa') ?: $design_defaults_hex['button_bg_color'],
+            'button_text_color'  => sanitize_hex_color($_POST['button_text_color'] ?? '#ffffff') ?: $design_defaults_hex['button_text_color'],
             'grid_card_width'    => absint($_POST['grid_card_width'] ?? 300),
             'grid_columns'       => absint($_POST['grid_columns'] ?? 3),
             'card_border_radius' => absint($_POST['card_border_radius'] ?? 8),
@@ -110,7 +118,7 @@ class FrontendSettingsPage
     public static function render_page()
     {
         if (! current_user_can('manage_options')) {
-            wp_die(__('Keine Berechtigung.', 'bs-awo-jobs'));
+            wp_die(esc_html__('Keine Berechtigung.', 'bs-awo-jobs'));
         }
 
         $design  = get_option(self::OPTION_PREFIX . 'design', []);
