@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       BS AWO Jobs
  * Plugin URI:        https://example.com/
- * Description:       Analytik-Backend für AWO-Stellenanzeigen (JSON-Snapshots, Schema-Inspector, manuelle Syncs).
+ * Description:       AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode mit konfigurierbarem Design.
  * Version:           0.1.0
  * Author:            Tom Evers
  * Text Domain:       bs-awo-jobs
@@ -115,7 +115,7 @@ add_action(
             \BsAwoJobs\Wp\Assets\DynamicStyles::init();
         }
 
-        // DB-Schema-Upgrades (z. B. neue Spalten in bsawo_events).
+        // DB-Schema-Upgrades (z. B. raw_json in bsawo_jobs_current).
         if (class_exists('\BsAwoJobs\Wp\Activation')) {
             \BsAwoJobs\Wp\Activation::maybe_upgrade();
         }
@@ -169,41 +169,18 @@ add_action(
 
 
         if (is_admin()) {
-            // Admin-Seiten registrieren.
             if (class_exists('\BsAwoJobs\Wp\Admin\SettingsPage')) {
                 \BsAwoJobs\Wp\Admin\SettingsPage::init();
             }
-
-            if (class_exists('\BsAwoJobs\Wp\Admin\SchemaPage')) {
-                \BsAwoJobs\Wp\Admin\SchemaPage::init();
-            }
-
-            if (class_exists('\BsAwoJobs\Wp\Admin\EventsPage')) {
-                \BsAwoJobs\Wp\Admin\EventsPage::init();
-            }
-
-            if (class_exists('\BsAwoJobs\Wp\Admin\StatsPage')) {
-                \BsAwoJobs\Wp\Admin\StatsPage::init();
-            }
-            
             if (class_exists('\BsAwoJobs\Wp\Admin\FrontendSettingsPage')) {
                 \BsAwoJobs\Wp\Admin\FrontendSettingsPage::init();
             }
 
-            // Admin-Assets laden.
             add_action(
                 'admin_enqueue_scripts',
                 function ($hook_suffix) {
-                    // Nur auf unseren Plugin-Seiten laden.
                     $page = isset($_GET['page']) ? sanitize_text_field(wp_unslash($_GET['page'])) : '';
-
-                    if (
-                        $page === BS_AWO_JOBS_MENU_SLUG
-                        || $page === 'bs-awo-jobs-schema'
-                        || $page === 'bs-awo-jobs-events'
-                        || $page === 'bs-awo-jobs-stats'
-                        || $page === 'bs-awo-jobs-frontend'
-                    ) {
+                    if ($page === BS_AWO_JOBS_MENU_SLUG || $page === 'bs-awo-jobs-frontend') {
                         wp_enqueue_style(
                             'bs-awo-jobs-admin',
                             BS_AWO_JOBS_PLUGIN_URL . 'assets/admin.css',
