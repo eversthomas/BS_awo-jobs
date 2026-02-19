@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       BS AWO Jobs
  * Description:       AWO-Stellenbörse: JSON-API-Sync und Anzeige per Shortcode mit konfigurierbarem Design.
- * Version:           0.1.0
+ * Version:           2.0
  * Author:            Tom Evers
  * Text Domain:       bs-awo-jobs
  * Domain Path:       /languages
@@ -13,7 +13,7 @@ if (! defined('ABSPATH')) {
 }
 
 // Plugin Konstanten.
-define('BS_AWO_JOBS_VERSION', '0.1.0');
+define('BS_AWO_JOBS_VERSION', '2.0');
 define('BS_AWO_JOBS_PLUGIN_FILE', __FILE__);
 define('BS_AWO_JOBS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BS_AWO_JOBS_PLUGIN_URL', plugin_dir_url(__FILE__));
