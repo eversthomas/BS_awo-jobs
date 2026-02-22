@@ -26,7 +26,7 @@ WordPress-Plugin zur Anzeige der AWO-Stellenbörse: JSON-API synchronisieren und
 
 ## Nutzung
 
-1. **AWO Jobs** (Hauptmenü): JSON-API-URL eintragen (z. B. `https://www.awo-jobs.de/stellenboerse-wesel.json`), Einstellungen speichern, dann **„Jetzt synchronisieren“** ausführen. Die Tabelle darunter zeigt alle aktuellen Stellen.
+1. **AWO Jobs** (Hauptmenü): JSON-API-URL eintragen (z. B. `https://www.awo-jobs.de/stellenboerse-XYZ.json`), Einstellungen speichern, dann **„Jetzt synchronisieren“** ausführen. Die Tabelle darunter zeigt alle aktuellen Stellen.
 2. **Frontend** (Untermenü): Design und Anzeige-Optionen anpassen, Shortcodes auf der Seite nachlesen und in Seiten/Beiträge einfügen.
 3. In einer Seite oder einem Beitrag den Shortcode einfügen, z. B. `[bs_awo_jobs]` oder `[bs_awo_jobs fachbereich="Pflege" layout="grid"]`.
 
